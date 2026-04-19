@@ -1,0 +1,23 @@
+# ==========================================================================
+# Bid Ingestion Workflow — POST /cre/bid
+# ==========================================================================
+# Accepts EIP-712 signed SilentBid bid; verifies signature; computes commitment;
+# optionally calls compliance API via Confidential HTTP; returns commitment for
+# frontend to call SilentBidCCA.submitSilentBid(commitment) or workflow submits.
+# ==========================================================================
+
+staging-settings:
+  user-workflow:
+    workflow-name: "silentbid-bid-ingestion-staging"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: "../../secrets.yaml"
+
+production-settings:
+  user-workflow:
+    workflow-name: "silentbid-bid-ingestion-production"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.production.json"
+    secrets-path: "../../secrets.yaml"

@@ -1,0 +1,17 @@
+# ==========================================================================
+# SilentBid CRE Project — Chainlink Runtime Environment
+# ==========================================================================
+# Used for sealed-bid auction workflows: bid ingestion, finalize, settle.
+# Run: cre workflow simulate ./workflows/bid-ingestion --target=staging-settings
+#      (with --http-payload '{"sender":"0x...","auctionId":"0x...",...}')
+# ==========================================================================
+
+staging-settings:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: https://ethereum-sepolia-rpc.publicnode.com
+
+production-settings:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia
+      url: https://ethereum-sepolia-rpc.publicnode.com

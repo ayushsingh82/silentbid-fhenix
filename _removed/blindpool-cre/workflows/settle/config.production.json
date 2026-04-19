@@ -1,0 +1,11 @@
+{
+  "chainId": 11155111,
+  "silentBidDomainName": "SilentBid CRE Settlement",
+  "silentBidDomainVersion": "1",
+  "verifyingContract": "0x0000000000000000000000000000000000000000",
+  "escrowContract": "0x0000000000000000000000000000000000000000",
+  "tokenAddress": "0x0000000000000000000000000000000000000000",
+  "complianceApiUrl": "",
+  "complianceApiKeyOwner": "",
+  "treasuryFeeBps": 250
+}

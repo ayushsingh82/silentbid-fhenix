@@ -1,0 +1,59 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 11111
+bytecode_hash = "none"
+solc = "0.8.26"
+verbosity = 2
+ffi = true
+
+fs_permissions = [
+  { access = "read-write", path = ".forge-snapshots" },
+  { access = "read", path = "script/" },
+]
+extra_output = ["storageLayout"]
+
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "solady/=lib/continuous-clearing-auction/lib/solady/src/",
+  "permit2/=lib/continuous-clearing-auction/lib/permit2/",
+  "v4-periphery/=lib/continuous-clearing-auction/lib/v4-periphery/",
+  "blocknumberish/=lib/continuous-clearing-auction/lib/blocknumberish/",
+  "continuous-clearing-auction/=lib/continuous-clearing-auction/src/",
+  "cca-test/=lib/continuous-clearing-auction/test/",
+  "@fhevm/solidity/=lib/fhevm/library-solidity/",
+  "encrypted-types/=lib/fhevm/library-solidity/node_modules/encrypted-types/",
+  "@fhevm-host-contracts/=lib/fhevm/host-contracts/",
+  "@fhevm-foundry/=lib/fhevm/host-contracts/fhevm-foundry/",
+  "fhevm-foundry/=lib/fhevm/host-contracts/fhevm-foundry/",
+  "@openzeppelin/contracts-upgradeable/=lib/fhevm/host-contracts/node_modules/@openzeppelin/contracts-upgradeable/",
+]
+
+test = "anviltest"
+
+additional_compiler_profiles = [{ name = "via_ir", optimizer_runs = 11111, via_ir = true }]
+
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+fail_on_revert = true
+runs = 100
+depth = 256
+
+[fmt]
+line_length = 120
+tab_width = 4
+quote_style = "double"
+sort_imports = true
+number_underscore = "thousands"
+
+# Sepolia RPC URL - set via environment variable (optional for forge script if you pass --rpc-url)
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
+
+# Omitted [etherscan] so deploy works without ETHERSCAN_API_KEY.
+# To verify: forge verify-contract --chain sepolia --etherscan-api-key <key> <address> <contract>

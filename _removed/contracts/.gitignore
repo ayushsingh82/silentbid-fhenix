@@ -1,0 +1,21 @@
+# Foundry
+cache/
+out/
+broadcast/
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Snapshots
+.forge-snapshots/
+
+# SigScan generated signatures
+signatures/
+MakeFile 

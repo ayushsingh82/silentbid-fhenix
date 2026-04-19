@@ -1,0 +1,29 @@
+{
+  "auctionId": "0x1234567890abcdef1234567890abcdef12345678",
+  "clearingPrice": "1000000000000000000",
+  "allocations": [
+    {
+      "bidder": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "amount": "5000000000000000000",
+      "maxPrice": "1200000000000000000",
+      "won": true,
+      "allocationAmount": "3"
+    },
+    {
+      "bidder": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "amount": "2000000000000000000",
+      "maxPrice": "1100000000000000000",
+      "won": true,
+      "allocationAmount": "1"
+    },
+    {
+      "bidder": "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "amount": "1500000000000000000",
+      "maxPrice": "900000000000000000",
+      "won": false,
+      "allocationAmount": "0"
+    }
+  ],
+  "treasuryAddress": "0xDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+  "auth": "0x"
+}

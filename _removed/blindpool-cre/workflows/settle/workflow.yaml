@@ -1,0 +1,24 @@
+# ==========================================================================
+# Settlement / Payout Workflow — POST /cre/settle
+# ==========================================================================
+# Accepts finalized auction allocation data; generates EIP-712 signed
+# SettlementTransfer messages for winner payouts and loser refunds;
+# computes treasury/issuer payout; optionally calls compliance/KYC API
+# via Confidential HTTP; returns settlement summary.
+# ==========================================================================
+
+staging-settings:
+  user-workflow:
+    workflow-name: "silentbid-settle-staging"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: "../../secrets.yaml"
+
+production-settings:
+  user-workflow:
+    workflow-name: "silentbid-settle-production"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.production.json"
+    secrets-path: "../../secrets.yaml"
