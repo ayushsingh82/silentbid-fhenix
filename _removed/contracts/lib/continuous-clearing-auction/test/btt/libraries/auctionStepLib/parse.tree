@@ -1,3 +1,0 @@
-ParseTest
-└── when called with 8 bytes of data
-    └── it returns mps and block delta

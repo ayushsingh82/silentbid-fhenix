@@ -19,7 +19,7 @@ export function PrinciplesSection() {
         { text: "SEALED ", highlight: false },
         { text: "BIDS", highlight: true },
       ],
-      description: "You sign your bid with EIP-712. Only a commitment is onchain; CRE stores and verifies the confidential message. No leakage to MEV or snipers until the auction closes.",
+      description: "Bids are encrypted client-side with cofhejs and submitted as euint64 handles. The contract operates on ciphertexts — no commitment scheme, no reveal step, no leakage.",
       align: "left",
     },
     {
@@ -28,7 +28,7 @@ export function PrinciplesSection() {
         { text: "FAIR ", highlight: false },
         { text: "DISCOVERY", highlight: true },
       ],
-      description: "Continuous, onchain price discovery. Market-clearing outcome seeds liquidity.",
+      description: "FHE.max and FHE.select run the auction inside the ciphertext. The highest bid wins — provably, without anyone learning the other bids.",
       align: "right",
     },
     {
@@ -37,7 +37,7 @@ export function PrinciplesSection() {
         { text: "PRIVACY ", highlight: false },
         { text: "BY DESIGN", highlight: true },
       ],
-      description: "Chainlink CRE and confidential EIP-712 messages. Bid data stays offchain; CRE workflow finalizes and forwards. Cryptographic confidentiality, onchain enforceability.",
+      description: "Fhenix CoFHE puts FHE natively in the EVM. Bids are ciphertexts on-chain, computation happens inside FHE, decryption is a permissioned async call. Cryptographic privacy with on-chain enforceability.",
       align: "left",
     },
     {
@@ -46,7 +46,7 @@ export function PrinciplesSection() {
         { text: "EQUITABLE ", highlight: false },
         { text: "LAUNCHES", highlight: true },
       ],
-      description: "More equitable token launch experience. Built on Uniswap's CCA, extended with CRE for privacy.",
+      description: "Anyone can bid without exposing their strategy. Winner is revealed; losers stay silent. A level playing field, enforced by FHE math.",
       align: "right",
     },
   ]
@@ -94,7 +94,7 @@ export function PrinciplesSection() {
       {/* Section header */}
       <div ref={headerRef} className="mb-24">
         <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">04 / Principles</span>
-        <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">BLINDPOOL VALUES</h2>
+        <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">SILENTBID VALUES</h2>
       </div>
 
       {/* Staggered principles */}

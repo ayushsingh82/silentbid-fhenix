@@ -1,5 +1,0 @@
-IsGraduatedTest
-├── given raised is LT required
-│   └── it returns false
-└── given raised is GE required
-    └── it returns true

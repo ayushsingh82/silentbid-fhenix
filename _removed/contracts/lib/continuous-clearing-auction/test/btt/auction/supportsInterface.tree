@@ -1,5 +1,0 @@
-SupportsInterfaceTest
-├── when interface is supported
-│   └── it returns true
-└── when interface is not supported
-    └── it returns false

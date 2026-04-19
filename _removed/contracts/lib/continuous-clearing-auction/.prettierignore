@@ -1,8 +1,0 @@
-foundry.toml
-out
-lib/
-cache/
-docs/
-snapshots/
-*.sol
-deployments/

@@ -9,7 +9,7 @@ const navItems: ({ id: string; label: string } | { href: string; label: string }
   { id: "hero", label: "SilentBid" },
   { id: "signals", label: "Features" },
   { id: "work", label: "Mechanism" },
-  { id: "cre", label: "CRE" },
+  { id: "cofhe", label: "CoFHE" },
   { id: "principles", label: "Principles" },
   { id: "colophon", label: "Colophon" },
   { href: "/auctions", label: "Auctions" },

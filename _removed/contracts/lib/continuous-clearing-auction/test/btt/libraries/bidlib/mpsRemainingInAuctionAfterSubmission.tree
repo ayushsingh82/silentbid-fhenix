@@ -1,3 +1,0 @@
-MpsRemainingInAuctionAfterSubmissionTest
-└── when called with bid
-    └── it returns mps - bid.startCumulativeMps

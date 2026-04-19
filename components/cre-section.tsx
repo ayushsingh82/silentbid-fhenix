@@ -9,26 +9,26 @@ gsap.registerPlugin(ScrollTrigger)
 const workflows = [
   {
     step: "01",
-    name: "Bid Ingestion",
-    route: "/api/cre/bid",
-    offchain: "Verify EIP-712 signature, compute keccak256 commitment, store bid privately. Optional compliance check via Confidential HTTP.",
-    onchain: "submitBlindBid(commitment) + msg.value escrow. Only the hash touches the chain.",
+    name: "Encrypt & Bid",
+    route: "cofhejs.encrypt → placeBid",
+    offchain: "cofhejs.encrypt([Encryptable.uint64(bid)]) builds an InEuint64 struct client-side. Signature + ctHash prove the ciphertext came from the user.",
+    onchain: "placeBid(auctionId) pulls encrypted escrow from cUSDC, runs FHE.gt / FHE.max / FHE.select to update highestBid and highestBidder — all in ciphertext.",
     accent: "accent",
   },
   {
     step: "02",
-    name: "Finalize",
-    route: "/api/cre/finalize",
-    offchain: "Load all sealed bids, run uniform-price discovery (sort by maxPrice desc), compute clearing price and winner allocations.",
-    onchain: "forwardBidsToCCA(clearingPrice, bids) — one batched transaction forwards all bids into CCA.",
+    name: "End & Decrypt",
+    route: "endAuction → CoFHE oracle",
+    offchain: "CoFHE threshold network picks up FHE.allowPublic requests and decrypts handles off-chain (~25s), then posts plaintext back on-chain.",
+    onchain: "endAuction() flips state to ended and calls FHE.allowPublic on highestBid + highestBidder. No sync decryption — the oracle handles it.",
     accent: "amber-500",
   },
   {
     step: "03",
-    name: "Settle",
-    route: "/api/cre/settle",
-    offchain: "Build settlement plan from allocations: winner payouts, excess-escrow refunds, loser full refunds.",
-    onchain: "Execute transfers via compliant private calls. Individual payouts stay confidential.",
+    name: "Publish & Settle",
+    route: "publishWinner → settleBid",
+    offchain: "Anyone reads the decrypted handles (via cofhejs.unseal or public getters) and triggers publishWinner with the plaintext winner + amount.",
+    onchain: "publishWinner records the plaintext outcome. Each loser calls settleBid to get their encrypted escrow back via cUSDC.transferEncrypted.",
     accent: "emerald-500",
   },
 ]
@@ -75,19 +75,19 @@ export function CreSection() {
   }, [])
 
   return (
-    <section ref={sectionRef} id="cre" className="relative py-32 pl-6 md:pl-28 pr-6 md:pr-12">
+    <section ref={sectionRef} id="cofhe" className="relative py-32 pl-6 md:pl-28 pr-6 md:pr-12">
       {/* Section header */}
       <div ref={headerRef} className="mb-16 flex items-end justify-between">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">
-            03 / Chainlink CRE
+            03 / Fhenix CoFHE
           </span>
           <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">
-            CRE WORKFLOWS
+            COFHE LIFECYCLE
           </h2>
         </div>
         <p className="hidden md:block max-w-xs font-mono text-xs text-muted-foreground text-right leading-relaxed">
-          Three offchain workflows keep bid data private. Only commitments and settlement results touch the chain.
+          Three on-chain phases. Bid amounts stay encrypted end-to-end; only the winning handle is ever decrypted.
         </p>
       </div>
 
@@ -114,7 +114,7 @@ export function CreSection() {
             {/* Offchain */}
             <div>
               <span className="font-mono text-[9px] uppercase tracking-[0.3em] text-muted-foreground">
-                Offchain (CRE)
+                Off-chain (cofhejs / CoFHE oracle)
               </span>
               <p className="mt-2 font-mono text-xs text-muted-foreground leading-relaxed">
                 {wf.offchain}
@@ -124,7 +124,7 @@ export function CreSection() {
             {/* Onchain */}
             <div>
               <span className="font-mono text-[9px] uppercase tracking-[0.3em] text-muted-foreground">
-                Onchain
+                On-chain (FHE.sol)
               </span>
               <p className="mt-2 font-mono text-xs text-foreground/80 leading-relaxed">
                 {wf.onchain}
@@ -146,9 +146,9 @@ export function CreSection() {
           Key point
         </span>
         <p className="font-mono text-xs text-muted-foreground leading-relaxed">
-          Sensitive data (bid prices, amounts, identities, payout details) is handled only in CRE workflows.
-          The chain sees only commitments and the batched forward / settlement results.
-          In production, CRE + Confidential HTTP ensures API keys and bid data never appear onchain or in public logs.
+          Bid amounts, escrow balances, and the running best-bidder all live on-chain as encrypted euint64 / eaddress handles.
+          The CoFHE threshold network holds the decryption key shares — the contract decides when handles become public
+          via FHE.allowPublic. Losing bids are never decrypted; escrow returns to the bidder as ciphertext.
         </p>
       </div>
     </section>

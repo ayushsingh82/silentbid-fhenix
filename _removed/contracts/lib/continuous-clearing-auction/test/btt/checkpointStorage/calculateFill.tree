@@ -1,4 +1,0 @@
-CalculateFillTest
-└── when called with params
-    ├── it returns the tokens filled
-    └── it returns the currency spent

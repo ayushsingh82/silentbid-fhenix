@@ -9,39 +9,39 @@ gsap.registerPlugin(ScrollTrigger)
 
 const experiments = [
   {
-    title: "Sealed-Bid CCA",
+    title: "FHE Sealed Bids",
     medium: "Core Mechanism",
-    description: "Chainlink CRE orchestrates sealed bids. You sign with EIP-712; only the commitment is onchain. CRE verifies and stores the confidential message, then finalizes and forwards after the blind deadline.",
+    description: "Fhenix CoFHE treats ciphertexts as first-class Solidity types. You encrypt your bid client-side with cofhejs; the contract accepts an euint64 and never sees the plaintext. The running max is tracked via FHE.max + FHE.select — all inside FHE.",
     span: "col-span-2 row-span-2",
   },
   {
-    title: "Price Discovery",
-    medium: "Continuous Auction",
-    description: "Bids integrate over time to determine a fair market-clearing price onchain.",
+    title: "euint64 Everywhere",
+    medium: "On-chain Ciphertexts",
+    description: "Bid amounts, cUSDC balances, and best-so-far bidder all live on-chain as encrypted handles.",
     span: "col-span-1 row-span-1",
   },
   {
     title: "No MEV Leak",
     medium: "Privacy Layer",
-    description: "Bid price and amount stay in CRE; only the hash is onchain. Bots and MEV cannot see your bid before close.",
+    description: "Bid amounts are ciphertexts on-chain. No commit-reveal means nothing to front-run — searchers and snipers see nothing but handles.",
     span: "col-span-1 row-span-2",
   },
   {
-    title: "Pool Seeding",
-    medium: "Liquidity",
-    description: "Auction outcome seeds a Uniswap pool. Permissionless, onchain.",
+    title: "cUSDC Escrow",
+    medium: "Confidential Settlement",
+    description: "Encrypted USDC wrapper. Wrap plaintext in, approve and transfer as ciphertext, unwrap via async claim.",
     span: "col-span-1 row-span-1",
   },
   {
-    title: "CRE + EIP-712",
-    medium: "Confidential Messages",
-    description: "Chainlink CRE and EIP-712 signed bids. Confidential HTTP keeps request/response private; CRE workflow enforces fairness and settlement.",
+    title: "Threshold Decrypt",
+    medium: "CoFHE Oracle",
+    description: "Post-close, FHE.allowPublic on the winning handle triggers async decryption by the CoFHE threshold network. Plaintext lands on-chain in ~25s so publishWinner can settle.",
     span: "col-span-2 row-span-1",
   },
   {
-    title: "Equitable Launches",
-    medium: "Fair Access",
-    description: "More equitable token launch experience for all participants.",
+    title: "Silent Refunds",
+    medium: "Loser Privacy",
+    description: "Losing bids are never decrypted. Their escrow returns as ciphertext — amounts stay sealed forever.",
     span: "col-span-1 row-span-1",
   },
 ]
@@ -102,7 +102,7 @@ export function WorkSection() {
           <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">HOW IT WORKS</h2>
         </div>
         <p className="hidden md:block max-w-xs font-mono text-xs text-muted-foreground text-right leading-relaxed">
-          EIP-712 signed bids, CRE workflows, and commitment-onchain. Privacy-first token launches.
+          FHE-encrypted bids, on-chain euint64 aggregation, async decryption. Privacy-first auctions.
         </p>
       </div>
 

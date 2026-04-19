@@ -9,29 +9,29 @@ gsap.registerPlugin(ScrollTrigger)
 
 const signals = [
   {
-    date: "2025.06.10",
-    title: "Sealed Bids",
-    note: "EIP-712 signed bid; only commitment onchain. CRE stores the confidential message and finalizes after the blind deadline.",
+    date: "2026.04.19",
+    title: "Encrypted Bids",
+    note: "Every bid is an euint64 ciphertext. cofhejs encrypts client-side; only handles touch the chain — plaintext amounts never leave your wallet.",
   },
   {
-    date: "2025.05.28",
-    title: "MEV Resistance",
-    note: "Eliminates pre-bid sniping and front-running. Bid price and amount stay in CRE until close.",
+    date: "2026.04.14",
+    title: "FHE Running Max",
+    note: "The contract computes FHE.max and FHE.select over encrypted bids. Winner is tracked without ever decrypting a single amount mid-auction.",
   },
   {
-    date: "2025.05.15",
-    title: "CCA Fork",
-    note: "Built on Uniswap's Continuous Clearing Auction for fair, continuous price discovery.",
+    date: "2026.04.08",
+    title: "Confidential USDC",
+    note: "cUSDC wraps MockUSDC as encrypted euint64 balances. Escrow, transfers, and approvals stay sealed end-to-end.",
   },
   {
-    date: "2025.04.30",
-    title: "Liquidity Bootstrapping",
-    note: "Bids integrate over time; market-clearing price seeds a Uniswap pool at close.",
+    date: "2026.04.02",
+    title: "Async Decryption",
+    note: "After endAuction, FHE.allowPublic unlocks the winner. CoFHE threshold oracle posts plaintext back in ~25s — then publishWinner settles.",
   },
   {
-    date: "2025.04.12",
-    title: "CRE + EIP-712",
-    note: "Chainlink CRE verifies EIP-712 and keeps bid data confidential. CRE workflow forwards to CCA at settlement.",
+    date: "2026.03.28",
+    title: "Silent Refunds",
+    note: "Losing bids are never revealed. settleBid transfers encrypted escrow back via cUSDC — amounts stay private forever.",
   },
 ]
 
@@ -136,7 +136,7 @@ export function SignalsSection() {
       {/* Section header */}
       <div ref={headerRef} className="mb-16 pr-6 md:pr-12">
         <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">01 / Features</span>
-        <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">WHY BLINDPOOL</h2>
+        <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">WHY SILENTBID</h2>
       </div>
 
       {/* Horizontal scroll container */}
