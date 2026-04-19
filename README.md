@@ -1,210 +1,171 @@
-# SilentBid
+# SilentBid — Fhenix CoFHE Edition
 
-> **Sealed-bid token launches on Uniswap CCA, powered by Chainlink CRE.**
+> **Sealed-bid auctions on Base Sepolia, powered by [Fhenix CoFHE](https://docs.fhenix.zone/).**
 >
-> Built for the **Chainlink Hackathon — Privacy Track**.
+> Bids stay encrypted end-to-end using Fully Homomorphic Encryption. The running max is computed inside FHE — the contract never sees a plaintext bid.
 
 ---
 
 ## TL;DR
 
-SilentBid adds sealed-bid privacy to [Uniswap's Continuous Clearing Auction (CCA)](https://docs.uniswap.org/contracts/liquidity-launchpad/CCA). Bids stay private until the auction closes — no front-running, no MEV sniping, no information leakage. We use **Chainlink Runtime Environment (CRE)** and **Confidential HTTP** to handle bid data offchain so only commitments ever touch the chain.
+SilentBid is a sealed-bid auction where every bid amount is an `euint64` (encrypted 64-bit int) stored directly on-chain. Escrow is held in **cUSDC**, a confidential wrapper around MockUSDC. At auction close the winning bid + bidder are decrypted asynchronously via the CoFHE threshold network; losers get their encrypted escrow refunded without anyone ever learning the amounts.
 
-**Live on Sepolia.** Full end-to-end flow: create auction → place sealed bid → CRE finalize → settle.
+No commit-reveal scheme. No relayer. No off-chain aggregator. The chain holds ciphertexts; CoFHE handles the math.
 
----
-
-## Problem
-
-Every bid on a standard CCA/LBP is public the moment it hits the mempool:
-
-- **MEV bots** front-run and copy bids before settlement.
-- **Last-block snipers** distort clearing prices.
-- **Retail bidders** get worse execution; projects get diluted allocations and less trust.
-
-Traditional finance solved this decades ago with sealed-bid auctions. We bring that to onchain token launches without changing the underlying CCA mechanism.
+**Live on Base Sepolia** (`chainId 84532`).
 
 ---
 
-## Solution
+## Why Fhenix CoFHE
 
-**SilentBid = Uniswap CCA + sealed bids via Chainlink CRE.**
+Traditional sealed-bid designs on Ethereum need one of:
 
-Only a `keccak256` commitment goes onchain during the auction. Bid prices, amounts, and identities are handled entirely within CRE workflows using Confidential HTTP. After the deadline, CRE runs price discovery and forwards all bids into the CCA in a single batched transaction.
+- **Commit-reveal** — two transactions, reveal step can be skipped to grief, leaks via timing.
+- **MPC / threshold networks** — complex, bespoke trust assumptions.
+- **Confidential compute** (TEE, CRE) — off-chain trust anchor, extra infra.
 
-Same clearing. Same pool seeding. Zero bid leakage.
-
----
-
-## How Chainlink CRE Powers SilentBid
-
-We built three CRE workflows that mirror the auction lifecycle. Each has a corresponding Next.js API route that implements the same logic and can be swapped for the CRE-hosted version in production.
-
-### 1. Bid Ingestion — `POST /api/cre/bid`
-
-User signs an **EIP-712 bid** (sender, auctionId, maxPrice, amount, timestamp) in-wallet. The workflow:
-
-1. Validates payload (addresses, positive amounts, required fields).
-2. Verifies the EIP-712 signature against the SilentBid domain.
-3. Computes `commitment = keccak256(abi.encodePacked(auctionId, sender, maxPrice, amount, timestamp))`.
-4. Stores the bid privately. In production, forwarded to CRE via **Confidential HTTP** so keys and bid data never appear onchain or in logs.
-5. Returns the commitment — the frontend calls `BlindPoolCCA.submitBlindBid(commitment)` with `msg.value = amount`.
-
-**CRE workflow:** `blindpool-cre/workflows/bid-ingestion` — same steps, plus optional compliance check via Confidential HTTP.
-
-### 2. Finalize — `POST /api/cre/finalize`
-
-After the blind-bid deadline:
-
-1. Loads all stored bids for the given `auctionId`.
-2. Runs **uniform-price discovery**: sort by maxPrice descending, clearing price = lowest winning bid's maxPrice.
-3. Builds calldata for `BlindPoolCCA.forwardBidsToCCA(clearingPrice, winningBids)`.
-4. An operator or CRE backend submits that single transaction — all sealed bids forwarded into the CCA.
-
-**CRE workflow:** `blindpool-cre/workflows/finalize` — triggered via HTTP, returns calldata for a relayer.
-
-### 3. Settle — `POST /api/cre/settle`
-
-Consumes the allocations from finalize:
-
-1. Validates `auctionId` and the allocations array.
-2. Builds settlement plan: winner payouts + excess-escrow refunds; loser full refunds.
-3. Returns the plan. In production, a CRE settle workflow executes transfers via compliant private calls.
-
-### Workflow Summary
-
-| Step | Route / CRE Workflow | Offchain (CRE) | Onchain |
-|------|----------------------|-----------------|---------|
-| **Bid** | `/api/cre/bid` ↔ `workflows/bid-ingestion` | Verify EIP-712, compute commitment, store bid, optional compliance via Confidential HTTP | `submitBlindBid(commitment)` + `msg.value` |
-| **Finalize** | `/api/cre/finalize` ↔ `workflows/finalize` | Load bids, uniform-price discovery, build `forwardBidsToCCA` calldata | `forwardBidsToCCA(...)` — one batched tx |
-| **Settle** | `/api/cre/settle` ↔ CRE settle workflow | Build payout/refund plan from allocations | Compliant private transfers per the plan |
-
-**Sensitive data (bid prices, amounts, identities, payout details) never appears onchain.** The chain sees only commitments and batched settlement results.
+CoFHE gives us native EVM FHE: ciphertexts are first-class Solidity types, the co-processor evaluates `FHE.max`, `FHE.select`, `FHE.gt` on-chain, and decryption is a permissioned async call. We get sealed bids in a **single contract** with no extra services.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Frontend (Next.js)                                     │
-│  Browse auctions · Create auction · Place sealed bid    │
-│  EIP-712 sign in-wallet → POST /api/cre/bid             │
-└────────────────────┬────────────────────────────────────┘
-                     │
-        ┌────────────▼────────────┐
-        │  CRE Workflows          │
-        │  (Confidential HTTP)    │
-        │                         │
-        │  bid-ingestion          │
-        │  finalize               │
-        │  settle                 │
-        └────────────┬────────────┘
-                     │
-        ┌────────────▼────────────┐
-        │  Smart Contracts        │
-        │  (Sepolia)              │
-        │                         │
-        │  BlindPoolCCA           │
-        │  BlindPoolFactory       │
-        │  Uniswap CCA (base)    │
-        └─────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Frontend (Next.js 16 + RainbowKit + Wagmi + Viem)          │
+│                                                             │
+│   cofhejs.encrypt([Encryptable.uint64(bid)]) → InEuint64    │
+│   cofhejs.unseal(handle, FheTypes.Uint64)                   │
+└──────────────────────────┬──────────────────────────────────┘
+                           │  InEuint64 struct (ctHash + sig)
+           ┌───────────────▼───────────────┐
+           │  SilentBidAuction.sol         │
+           │                               │
+           │  placeBid(auctionId)          │
+           │   ├─ cUSDC.transferFromAllow  │  (encrypted escrow)
+           │   ├─ FHE.gt(bid, highestBid)  │
+           │   ├─ highestBid = FHE.max(..) │
+           │   └─ highestBidder = select() │
+           │                               │
+           │  endAuction()                 │
+           │   └─ FHE.decrypt(highestBid)  │  (async oracle)
+           │                               │
+           │  publishWinner(winner, amt)   │
+           │  settleBid(idx)  ← refunds    │
+           │  revealMyBid(idx)             │
+           └───────────────┬───────────────┘
+                           │
+           ┌───────────────▼───────────────┐
+           │  ConfidentialUSDC.sol         │
+           │                               │
+           │  wrap(uint64) plaintext in    │
+           │  approve(spender, encAmount)  │
+           │  requestUnwrap(encAmount)     │  (two-step async)
+           │  claimUnwrap(id, plain)       │
+           └───────────────────────────────┘
 ```
 
-### Repos
+### Contracts
 
-| Repo | What |
-|------|------|
-| **This repo** (frontend) | Next.js app + API routes (`/api/cre/bid`, `/api/cre/finalize`, `/api/cre/settle`) |
-| **blindpool-cre/** | CRE workflow definitions (bid-ingestion, finalize). Simulatable with `cre workflow simulate`. |
-| **[Silentbid-scripts](https://github.com/ayushsingh82/Silentbid-scripts)** | Solidity contracts (BlindPoolCCA, BlindPoolFactory) + Foundry deploy/test scripts |
+| File | Purpose |
+|------|---------|
+| `SilentBidAuction.sol` | Sealed-bid auction with FHE running max; encrypted escrow via cUSDC |
+| `ConfidentialUSDC.sol` | `euint64` wrapper around MockUSDC (wrap / requestUnwrap / claimUnwrap) |
+| `MockUSDC.sol` | 6-decimal ERC-20 mint faucet for Base Sepolia testing |
 
 ---
 
-## Deployed Contracts (Sepolia)
+## Deployed Contracts (Base Sepolia)
 
 | Contract | Address |
 |----------|---------|
-| ERC20 Token (mock) | `0x9D3B8A874b173DA351C026132319459C957D1528` |
-| CCA Auction | `0x3045F74EBd5d72CEa21118347Dd42e44f89c0eC7` |
-| SilentBidCCA | `0xb4B81F8F93171Ab65a9f363c0524b2ED18af3F25` |
-| SilentBidFactory | `0xe4d9d1ab7F7d1AbB85b3EF7cDb4505c8D5a74fB5` |
+| MockUSDC | [`0xF1235b1782D48EbDf23673b115E51d03703463a1`](https://sepolia.basescan.org/address/0xF1235b1782D48EbDf23673b115E51d03703463a1) |
+| ConfidentialUSDC (cUSDC) | [`0x651524Af19c2edeb94DE60ECd0B9B361B53AAAFF`](https://sepolia.basescan.org/address/0x651524Af19c2edeb94DE60ECd0B9B361B53AAAFF) |
+| SilentBidAuction | [`0x3199d17cfa7027f91504F960DbCd34D44d284434`](https://sepolia.basescan.org/address/0x3199d17cfa7027f91504F960DbCd34D44d284434) |
+| Unwrap Keeper | [`0xf43F4FC18BaCEFE1C96e4FA6bdc8585FBAEd4Cf7`](https://sepolia.basescan.org/address/0xf43F4FC18BaCEFE1C96e4FA6bdc8585FBAEd4Cf7) |
+
+Chain: **Base Sepolia** (`84532`) · RPC: `https://sepolia.base.org`
+
+Addresses are hardcoded in `lib/fhenix-contracts.ts` and `lib/chain-config.ts` — no env file needed to run the UI against the live deployment.
+
+---
+
+## Auction Lifecycle
+
+### 1. Create auction
+Seller calls `createAuction(itemName, itemDescription, minBidPlain, durationSeconds)`. Item metadata + floor price are public. End time is public. Running max is initialized to encrypted zero via `FHE.asEuint64(0)`.
+
+### 2. Wrap USDC → cUSDC
+Bidder mints MockUSDC (faucet), approves `cUSDC.wrap(amount)`. cUSDC stores balance as `euint64` and `FHE.allow`s the user so they can spend it.
+
+### 3. Place sealed bid
+Frontend encrypts bid: `cofhejs.encrypt([Encryptable.uint64(bid)])` → `InEuint64`. Bidder calls `cUSDC.approve(auction, encAmount)` then `auction.placeBid(auctionId)`. The auction contract:
+
+- Pulls encrypted escrow via `cUSDC.transferFromAllowance`.
+- Computes `isHigher = FHE.gt(encBid, highestBid)` (all encrypted).
+- Updates `highestBid = FHE.max(highestBid, encBid)` and `highestBidder = FHE.select(isHigher, encMsgSender, highestBidder)`.
+- Emits `BidPlaced(auctionId, bidIndex, bidder, encAmountHandle)` — only the handle, not the value.
+
+### 4. End auction
+After `endTime`, anyone calls `endAuction(auctionId)`. The contract marks `ended = true`, calls `FHE.allowPublic(highestBid)` and `FHE.allowPublic(highestBidder)`, then requests async decryption from the CoFHE threshold oracle (~25s).
+
+### 5. Publish winner
+Once the oracle posts the plaintext, a keeper (or anyone) calls `publishWinner(auctionId, winner, amount)`. The contract verifies against the decrypted handles and records `winnerPlain` + `winningAmountPlain`.
+
+### 6. Settle & refund
+Each losing bidder calls `settleBid(auctionId, bidIndex)` — the contract transfers their encrypted escrow back via `cUSDC.transferEncrypted`. The winner's escrow routes to the seller. Optionally, any bidder can call `revealMyBid(auctionId, bidIndex)` to `FHE.allowPublic` their own bid for post-auction transparency.
+
+### 7. Unwrap cUSDC → USDC
+Two-step (decryption is async):
+
+1. `cUSDC.requestUnwrap(encAmount)` → emits `UnwrapRequested(unwrapId, from, handle)`.
+2. Off-chain keeper / user `cofhejs.unseal`s the handle, then calls `cUSDC.claimUnwrap(unwrapId, plain)` which transfers MockUSDC out.
 
 ---
 
 ## Privacy Model
 
-| Data | Standard CCA | SilentBid |
-|------|-------------|-----------|
-| Bidder identity | Public (`msg.sender`) | **Private** until auction close |
-| Max price | Public (onchain param) | **Private** until close |
-| Budget / amount | Public (onchain param) | **Private** until close |
-| Per-bid fill state | Public | **Private** until settlement |
-| Clearing price | Public | Public **after** close |
-| Auction params, end time | Public | Public |
-| Settlement & pool seed | Public | Public (after close) |
+| Data | Visibility |
+|------|------------|
+| Bid amount | **Encrypted on-chain** (`euint64`) — never decrypted for losers |
+| Bidder identity (best-so-far) | **Encrypted on-chain** (`eaddress`) until auction close |
+| Per-bidder escrow balance (cUSDC) | **Encrypted on-chain** (`euint64`) |
+| `msg.sender` of each `placeBid` | Public (unavoidable) |
+| Running highest bid post-close | Public (via `FHE.allowPublic` + async decrypt) |
+| Winner address post-close | Public (via `FHE.allowPublic` + async decrypt) |
+| Losing bids | **Never revealed** unless the bidder opts in via `revealMyBid` |
+| Auction params, duration, floor | Public |
 
-**Only commitments onchain during the auction.** Everything else stays in CRE until settlement.
+**Trust model:** CoFHE threshold network holds the FHE decryption key shares. The contract controls *when* decryption is authorized (only after `endAuction`, and only for the aggregate winner). Individual losing bids are never decrypted.
 
 ---
 
 ## Getting Started
 
-```bash
-# Install
-bun install
-
-# Run dev server (serves UI + API routes)
-bun run dev
-
-# Build
-bun run build
-
-# Test (vitest — real onchain, zero mocks)
-bun run test
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-### Environment
-
-Copy `.env.local.example` or set these in `.env.local`:
-
-```env
-NEXT_PUBLIC_SILENTBID_FACTORY_ADDRESS=0xe4d9d1ab7F7d1AbB85b3EF7cDb4505c8D5a74fB5
-NEXT_PUBLIC_DEFAULT_TOKEN=0x9D3B8A874b173DA351C026132319459C957D1528
-NEXT_PUBLIC_LATEST_AUCTION=0x3045F74EBd5d72CEa21118347Dd42e44f89c0eC7
-NEXT_PUBLIC_LATEST_SILENTBID=0xb4B81F8F93171Ab65a9f363c0524b2ED18af3F25
-NEXT_PUBLIC_DEPLOYER=0xE2b39f4cfFA5B17434e47Ab5F54b984155e4b7aD
-```
-
-Optional: `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` for WalletConnect ([cloud.walletconnect.com](https://cloud.walletconnect.com/)).
-
-### CRE Workflow Simulation
+### Frontend
 
 ```bash
-cd blindpool-cre
-bun install
-
-# Simulate bid ingestion
-cre workflow simulate ./workflows/bid-ingestion \
-  --target=staging-settings \
-  --http-payload ./workflows/bid-ingestion/http-payload.example.json \
-  --non-interactive --trigger-index 0
-
-# Simulate finalize
-cre workflow simulate ./workflows/finalize \
-  --target=staging-settings \
-  --http-payload '{"auctionId":"0x3045F74EBd5d72CEa21118347Dd42e44f89c0eC7"}' \
-  --non-interactive --trigger-index 0
+npm install
+npm run dev
 ```
 
-### Foundry (Contracts)
+Open [http://localhost:3000](http://localhost:3000). The UI is wired to the live Base Sepolia deployment — connect a wallet with Base Sepolia ETH + MockUSDC and you can create auctions or bid immediately.
+
+Faucets:
+- Base Sepolia ETH: https://www.alchemy.com/faucets/base-sepolia
+- MockUSDC: click **"Mint"** on the Wallet page (calls `MockUSDC.mint` directly)
+
+### Contracts
 
 ```bash
-cd ../Silentbid-scripts
-forge test -vv
+cd contracts
+npm install
+cp .env.example .env   # set DEPLOYER_PRIVATE_KEY + BASE_SEPOLIA_RPC_URL
+npm run compile
+npm run deploy          # hardhat run scripts/deploy.ts --network base-sepolia
 ```
+
+`cofhe-hardhat-plugin` injects the CoFHE mocks for local Hardhat tests so you can iterate without hitting Base Sepolia.
 
 ---
 
@@ -212,28 +173,43 @@ forge test -vv
 
 | Layer | Tech |
 |-------|------|
-| Frontend | Next.js 16, Tailwind CSS, RainbowKit, Wagmi, viem |
-| Privacy / offchain | Chainlink CRE, Confidential HTTP, EIP-712 |
-| Contracts | Solidity (BlindPoolCCA, BlindPoolFactory), Foundry |
-| Base mechanism | Uniswap CCA (forked, unmodified settlement) |
-| Chain | Sepolia testnet (11155111) |
+| FHE runtime | [Fhenix CoFHE](https://docs.fhenix.zone/) (`@fhenixprotocol/cofhe-contracts@0.0.13`) |
+| Client crypto | [`cofhejs@0.3.1`](https://github.com/FhenixProtocol/cofhejs) — encrypt / unseal |
+| Contracts | Solidity 0.8.25, Hardhat 2.22, `cofhe-hardhat-plugin@0.3.1` |
+| Frontend | Next.js 16, RainbowKit, Wagmi, Viem, Tailwind CSS |
+| Chain | Base Sepolia (`84532`) |
 
 ---
 
-## What We Demonstrated
+## Key Files
 
-- **End-to-end sealed-bid flow** on Sepolia: create auction → deploy SilentBid wrapper → place EIP-712 signed bid → CRE bid ingestion → finalize (price discovery + `forwardBidsToCCA`) → settle.
-- **Three CRE workflows** (bid-ingestion, finalize, settle) that keep all bid data offchain via Confidential HTTP.
-- **Real onchain tests** (vitest, 60 tests, zero mocks) covering ABIs, bid commitment, chain config, API routes.
-- **Full-stack frontend** — auction creation, sealed bid placement, auction browsing, all connected to live Sepolia contracts.
-- **Minimal onchain footprint** — only `keccak256` commitments and one batched `forwardBidsToCCA` call touch the chain.
+| Path | What |
+|------|------|
+| `contracts/contracts/SilentBidAuction.sol` | Sealed-bid auction logic (FHE running max) |
+| `contracts/contracts/ConfidentialUSDC.sol` | Encrypted USDC wrapper |
+| `contracts/contracts/MockUSDC.sol` | Plaintext ERC-20 faucet |
+| `contracts/scripts/deploy.ts` | Base Sepolia deploy script |
+| `lib/fhenix-contracts.ts` | Hardcoded addresses + ABIs + helpers (`formatUsdc`, `auctionStatus`) |
+| `lib/chain-config.ts` | Base Sepolia chain + transport config |
+| `app/auctions/page.tsx` | Auction browser |
+| `app/auctions/new/create-auction-form.tsx` | Create-auction form |
+| `app/auctions/[id]/place-bid-form.tsx` | Sealed-bid placement (cofhejs encrypt) |
+| `app/wallet/page.tsx` | Mint MockUSDC, wrap/unwrap cUSDC |
+
+---
+
+## Notes on the CoFHE Flow
+
+- **Async decryption.** Every decrypt is a request → oracle posts back (~25s on Base Sepolia). The UI polls with a retry loop; contracts split into two functions (`endAuction` / `publishWinner`, `requestUnwrap` / `claimUnwrap`) to match.
+- **`FHE.allow` is mandatory.** Any ciphertext you want to re-read in a later transaction must be `FHE.allowThis()`'d. Any ciphertext you want the user to unseal must be `FHE.allow(user)`'d.
+- **`FHE.allowPublic` is one-way.** Once called, the handle is decryptable by anyone. Only used post-auction for winner disclosure and per-bidder opt-in reveal.
+- **Gas.** FHE ops are pricey (~1–5M gas for a bid). Base Sepolia's low fees make this fine for demo; mainnet would want batching.
 
 ---
 
 ## References
 
-- [Uniswap CCA Documentation](https://docs.uniswap.org/)
-- [CCA Contract & Technical Reference](https://github.com/Uniswap/continuous-clearing-auction)
-- [Chainlink CRE / Confidential Compute](https://docs.chain.link/cre)
-- [Compliant Private Transfer Demo (CRE pattern)](https://github.com/smartcontractkit)
-- [EIP-712: Typed Structured Data Hashing and Signing](https://eips.ethereum.org/EIPS/eip-712)
+- [Fhenix CoFHE docs](https://docs.fhenix.zone/)
+- [`cofhe-contracts` on npm](https://www.npmjs.com/package/@fhenixprotocol/cofhe-contracts)
+- [`cofhejs` on npm](https://www.npmjs.com/package/cofhejs)
+- [Base Sepolia explorer](https://sepolia.basescan.org/)
