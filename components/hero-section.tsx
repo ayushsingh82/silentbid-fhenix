@@ -60,7 +60,7 @@ export function HeroSection() {
         </h2>
 
         <p className="mt-12 max-w-md font-mono text-sm text-muted-foreground leading-relaxed">
-          Sealed-bid auctions powered by Fhenix CoFHE. Every bid is an encrypted <code className="text-accent">euint64</code> — the running max is computed inside FHE, so the contract never sees a plaintext amount. Escrow lives in cUSDC, a confidential USDC wrapper. No commit-reveal, no relayers, no MEV leakage. Winner is decrypted post-close via the CoFHE threshold network; losers get their encrypted escrow refunded silently.
+          Sealed-bid auctions powered by Fhenix CoFHE. Every bid is an encrypted <code className="text-accent">euint64</code> and the running max is computed inside FHE, so the contract never sees plaintext amounts. Escrow lives in cUSDC, a confidential USDC wrapper. No commit-reveal and no off-chain confidential-compute workflow - just native on-chain FHE plus async threshold decryption after close.
         </p>
 
         <div className="mt-16 flex items-center gap-8">
@@ -83,7 +83,7 @@ export function HeroSection() {
       {/* Floating info tag */}
       <div className="absolute bottom-8 right-8 md:bottom-12 md:right-12">
         <div className="border border-border px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          v.01 / Fhenix CoFHE + euint64 + cUSDC
+          v.01 / Fhenix CoFHE + on-chain euint64 + cUSDC
         </div>
       </div>
     </section>

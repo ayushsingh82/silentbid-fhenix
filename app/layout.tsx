@@ -15,8 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SilentBid — Privacy-Focused CCA & Sealed-Bid Token Launches",
-  description: "SilentBid extends Uniswap's Continuous Clearing Auction with sealed-bid confidentiality. Fair, MEV-resistant token launches onchain.",
+  title: "SilentBid - Fhenix CoFHE Sealed-Bid Auctions",
+  description:
+    "Sealed-bid auctions on Base Sepolia powered by Fhenix CoFHE. Bids stay encrypted end-to-end, with on-chain FHE max computation and confidential cUSDC escrow.",
 };
 
 export default function RootLayout({
