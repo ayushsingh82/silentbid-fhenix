@@ -7,6 +7,7 @@ import { useEffect, useState, useCallback, useRef } from "react"
 import { PlaceBidForm } from "./place-bid-form"
 import { LatestBids } from "./latest-bids"
 import { RevealPanel } from "./reveal-panel"
+import { useAuctionAutomation } from "@/lib/use-auction-automation"
 import { cn } from "@/lib/utils"
 import { chainId, networkName } from "@/lib/chain-config"
 import {
@@ -55,6 +56,9 @@ export default function AuctionDetailPage() {
   const [refreshKey, setRefreshKey] = useState(0)
   const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), [])
   const lastFetchedId = useRef<string | null>(null)
+
+  // Automatic settlement when auction ends
+  const automationStatus = useAuctionAutomation(auctionId)
 
   const fetchAuction = useCallback(async () => {
     if (!publicClient || auctionId === null || !AUCTION_ADDRESS) return
@@ -162,6 +166,23 @@ export default function AuctionDetailPage() {
           Seller {auction.seller.slice(0, 6)}…{auction.seller.slice(-4)} · Auction #{auction.id.toString()} · {networkName}
         </p>
 
+        {/* Automation Status */}
+        {automationStatus.status !== "idle" && (
+          <div className={cn(
+            "mt-4 border p-3 rounded text-[10px] font-mono",
+            automationStatus.status === "checking" && "border-blue-500/40 bg-blue-500/5 text-blue-500",
+            automationStatus.status === "settling" && "border-yellow-500/40 bg-yellow-500/5 text-yellow-500",
+            automationStatus.status === "error" && "border-destructive/40 bg-destructive/5 text-destructive",
+          )}>
+            <p className="uppercase tracking-widest mb-1">
+              {automationStatus.status === "checking" && "🔍 Checking…"}
+              {automationStatus.status === "settling" && "⚙️ Auto-Settling…"}
+              {automationStatus.status === "error" && "❌ Error"}
+            </p>
+            <p>{automationStatus.message}</p>
+          </div>
+        )}
+
         <dl className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-6 font-mono text-sm">
           <div>
             <dt className="text-[10px] uppercase tracking-widest text-muted-foreground/70">Floor (display)</dt>
@@ -181,12 +202,12 @@ export default function AuctionDetailPage() {
           </div>
           <div>
             <dt className="text-[10px] uppercase tracking-widest text-muted-foreground/70">
-              {auction.winnerPublished ? "Winning bid" : "Winning bid"}
+              {auction.finalized ? "Winning bid" : "Winning bid"}
             </dt>
             <dd className="mt-1 text-foreground">
-              {auction.winnerPublished
+              {auction.finalized
                 ? `${formatUsdc(auction.winningAmountPlain, 2)} USDC`
-                : <span className="text-purple-400 text-[10px]">hidden until reveal</span>}
+                : <span className="text-purple-400 text-[10px]">hidden until finalized</span>}
             </dd>
           </div>
         </dl>
@@ -222,7 +243,7 @@ export default function AuctionDetailPage() {
 
         {(status === "ended" || status === "settled") && (
           <div className="mt-14 pt-10 border-t border-border/40">
-            <RevealPanel auction={auction} onUpdate={bumpRefresh} />
+            <RevealPanel auction={auction} onUpdate={bumpRefresh} automationStatus={automationStatus} />
           </div>
         )}
       </div>
