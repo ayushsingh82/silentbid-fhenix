@@ -19,7 +19,7 @@ export function PrinciplesSection() {
         { text: "SEALED ", highlight: false },
         { text: "BIDS", highlight: true },
       ],
-      description: "Bids are encrypted client-side with cofhejs and submitted as euint64 handles. The contract operates on ciphertexts — no commitment scheme, no reveal step, no leakage.",
+      description: "Bids are encrypted client-side with @cofhe/sdk and submitted as euint64 handles. The contract operates on ciphertexts — no commitment scheme, no reveal step, no leakage.",
       align: "left",
     },
     {

@@ -1,9 +1,10 @@
 import { type Address } from "viem"
 
-export const USDC_ADDRESS = "0xF1235b1782D48EbDf23673b115E51d03703463a1" as Address
-export const CUSDC_ADDRESS = "0x651524Af19c2edeb94DE60ECd0B9B361B53AAAFF" as Address
-export const AUCTION_ADDRESS = "0x3199d17cfa7027f91504F960DbCd34D44d284434" as Address
+export const USDC_ADDRESS = "0xA8269A6Dc3f9AE5936A930e5F8Fa9B17937feE94" as Address
+export const CUSDC_ADDRESS = "0xa1585b1792ed34754BE126584BBDa5CB7e15bA3d" as Address
+export const AUCTION_ADDRESS = "0xbf6b4Dd1E1498f575ffC3722E4350F9C51abEa78" as Address
 export const UNWRAPPER_ADDRESS = "0xf43F4FC18BaCEFE1C96e4FA6bdc8585FBAEd4Cf7" as Address
+export const TREASURY_ADDRESS = "0x1D1494b3a858Ed8b37B362eA6895665FfC71D11B" as Address
 
 export const USDC_DECIMALS = 6
 export const SCALE = 1_000_000n // 10 ** 6
@@ -78,7 +79,7 @@ export const CUSDC_ABI = [
     type: "function",
     stateMutability: "view",
     inputs: [{ name: "account", type: "address" }],
-    outputs: [{ type: "uint256" }], // euint64 handle
+    outputs: [{ type: "bytes32" }], // euint64 handle (bytes32 in v0.1.3)
   },
   {
     name: "allowance",
@@ -88,7 +89,7 @@ export const CUSDC_ABI = [
       { name: "owner", type: "address" },
       { name: "spender", type: "address" },
     ],
-    outputs: [{ type: "uint256" }],
+    outputs: [{ type: "bytes32" }],
   },
   {
     name: "wrap",
@@ -105,7 +106,7 @@ export const CUSDC_ABI = [
       { name: "spender", type: "address" },
       { name: "encAmount", type: "tuple", components: InEncStruct },
     ],
-    outputs: [{ type: "uint256" }],
+    outputs: [{ type: "bytes32" }],
   },
   {
     name: "requestUnwrap",
@@ -130,7 +131,7 @@ export const CUSDC_ABI = [
     inputs: [
       { name: "unwrapId", type: "uint256", indexed: true },
       { name: "from", type: "address", indexed: true },
-      { name: "encAmountHandle", type: "uint256", indexed: false },
+      { name: "encAmountHandle", type: "bytes32", indexed: false },
     ],
   },
   {
@@ -144,7 +145,49 @@ export const CUSDC_ABI = [
   },
 ] as const
 
-// ─── SilentBidAuction ───────────────────────────────────
+// ─── Treasury ───────────────────────────────────────────
+export const TREASURY_ABI = [
+  {
+    name: "feeBasisPoints",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint16" }],
+  },
+  {
+    name: "owner",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
+  },
+  {
+    name: "setFeeBasisPoints",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "_bps", type: "uint16" }],
+    outputs: [],
+  },
+  {
+    name: "authorizeContract",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "_contract", type: "address" }],
+    outputs: [],
+  },
+  {
+    name: "withdraw",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const
+
+// ─── SilentBidAuction V2 ───────────────────────────────
 export const AUCTION_ABI = [
   {
     name: "nextAuctionId",
@@ -154,9 +197,23 @@ export const AUCTION_ABI = [
     outputs: [{ type: "uint256" }],
   },
   {
+    name: "minGasDeposit",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    name: "minBidGasFee",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+  {
     name: "createAuction",
     type: "function",
-    stateMutability: "nonpayable",
+    stateMutability: "payable",
     inputs: [
       { name: "itemName", type: "string" },
       { name: "itemDescription", type: "string" },
@@ -168,7 +225,7 @@ export const AUCTION_ABI = [
   {
     name: "placeBid",
     type: "function",
-    stateMutability: "nonpayable",
+    stateMutability: "payable",
     inputs: [{ name: "auctionId", type: "uint256" }],
     outputs: [{ name: "bidIndex", type: "uint256" }],
   },
@@ -180,28 +237,20 @@ export const AUCTION_ABI = [
     outputs: [],
   },
   {
-    name: "publishWinner",
+    name: "finalizeAuction",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
       { name: "auctionId", type: "uint256" },
       { name: "winner", type: "address" },
       { name: "amount", type: "uint64" },
+      { name: "winnerSig", type: "bytes" },
+      { name: "amountSig", type: "bytes" },
     ],
     outputs: [],
   },
   {
     name: "revealMyBid",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "auctionId", type: "uint256" },
-      { name: "bidIndex", type: "uint256" },
-    ],
-    outputs: [],
-  },
-  {
-    name: "settleBid",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
@@ -227,8 +276,8 @@ export const AUCTION_ABI = [
     ],
     outputs: [
       { name: "bidder", type: "address" },
-      { name: "encAmountHandle", type: "uint256" },
-      { name: "refunded", type: "bool" },
+      { name: "encAmountHandle", type: "bytes32" },
+      { name: "settled", type: "bool" },
       { name: "revealed", type: "bool" },
     ],
   },
@@ -249,12 +298,14 @@ export const AUCTION_ABI = [
           { name: "endTime", type: "uint64" },
           { name: "ended", type: "bool" },
           { name: "decryptRequested", type: "bool" },
-          { name: "highestBidHandle", type: "uint256" },
-          { name: "highestBidderHandle", type: "uint256" },
-          { name: "winnerPublished", type: "bool" },
+          { name: "highestBidHandle", type: "bytes32" },
+          { name: "highestBidderHandle", type: "bytes32" },
+          { name: "finalized", type: "bool" },
           { name: "winnerPlain", type: "address" },
           { name: "winningAmountPlain", type: "uint64" },
           { name: "numBids", type: "uint256" },
+          { name: "gasDeposit", type: "uint256" },
+          { name: "bidGasPool", type: "uint256" },
         ],
       },
     ],
@@ -268,6 +319,7 @@ export const AUCTION_ABI = [
       { name: "itemName", type: "string", indexed: false },
       { name: "minBidPlain", type: "uint64", indexed: false },
       { name: "endTime", type: "uint64", indexed: false },
+      { name: "gasDeposit", type: "uint256", indexed: false },
     ],
   },
   {
@@ -277,16 +329,17 @@ export const AUCTION_ABI = [
       { name: "auctionId", type: "uint256", indexed: true },
       { name: "bidIndex", type: "uint256", indexed: true },
       { name: "bidder", type: "address", indexed: true },
-      { name: "encAmountHandle", type: "uint256", indexed: false },
+      { name: "encAmountHandle", type: "bytes32", indexed: false },
     ],
   },
   {
     type: "event",
-    name: "WinnerPublished",
+    name: "AuctionFinalized",
     inputs: [
       { name: "auctionId", type: "uint256", indexed: true },
       { name: "winner", type: "address", indexed: true },
       { name: "amount", type: "uint64", indexed: false },
+      { name: "fee", type: "uint64", indexed: false },
     ],
   },
   {
@@ -296,7 +349,7 @@ export const AUCTION_ABI = [
       { name: "auctionId", type: "uint256", indexed: true },
       { name: "bidIndex", type: "uint256", indexed: true },
       { name: "bidder", type: "address", indexed: true },
-      { name: "encAmountHandle", type: "uint256", indexed: false },
+      { name: "encAmountHandle", type: "bytes32", indexed: false },
     ],
   },
 ] as const
@@ -310,22 +363,24 @@ export type AuctionData = {
   endTime: bigint
   ended: boolean
   decryptRequested: boolean
-  highestBidHandle: bigint
-  highestBidderHandle: bigint
-  winnerPublished: boolean
+  highestBidHandle: string  // bytes32 hex
+  highestBidderHandle: string  // bytes32 hex
+  finalized: boolean
   winnerPlain: Address
   winningAmountPlain: bigint
   numBids: bigint
+  gasDeposit: bigint
+  bidGasPool: bigint
 }
 
 export type AuctionStatus = "active" | "ended" | "settled"
 
 export function auctionStatus(a: AuctionData): AuctionStatus {
-  if (a.winnerPublished) return "settled"
+  if (a.finalized) return "settled"
   if (a.ended || BigInt(Math.floor(Date.now() / 1000)) >= a.endTime) return "ended"
   return "active"
 }
 
 export function decryptPending(a: AuctionData): boolean {
-  return a.ended && !a.winnerPublished
+  return a.ended && !a.finalized
 }

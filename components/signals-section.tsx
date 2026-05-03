@@ -11,7 +11,7 @@ const signals = [
   {
     date: "2026.04.19",
     title: "Encrypted Bids",
-    note: "Every bid is an euint64 ciphertext. cofhejs encrypts client-side; only handles touch the chain — plaintext amounts never leave your wallet.",
+    note: "Every bid is an euint64 ciphertext. @cofhe/sdk encrypts client-side; only handles touch the chain — plaintext amounts never leave your wallet.",
   },
   {
     date: "2026.04.14",

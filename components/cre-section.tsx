@@ -10,8 +10,8 @@ const workflows = [
   {
     step: "01",
     name: "Encrypt & Bid",
-    route: "cofhejs.encrypt → placeBid",
-    offchain: "cofhejs.encrypt([Encryptable.uint64(bid)]) builds an InEuint64 struct client-side. Signature + ctHash prove the ciphertext came from the user.",
+    route: "encryptInputs → placeBid",
+    offchain: "client.encryptInputs([Encryptable.uint64(bid)]).execute() builds an InEuint64 struct client-side. Signature + ctHash prove the ciphertext came from the user.",
     onchain: "placeBid(auctionId) pulls encrypted escrow from cUSDC, runs FHE.gt / FHE.max / FHE.select to update highestBid and highestBidder — all in ciphertext.",
     accent: "accent",
   },
@@ -27,7 +27,7 @@ const workflows = [
     step: "03",
     name: "Publish & Settle",
     route: "publishWinner → settleBid",
-    offchain: "Anyone reads the decrypted handles (via cofhejs.unseal or public getters) and triggers publishWinner with the plaintext winner + amount.",
+    offchain: "Anyone reads the decrypted handles (via client.decryptForTx or public getters) and triggers publishWinner with the plaintext winner + amount + signatures.",
     onchain: "publishWinner records the plaintext outcome. Each loser calls settleBid to get their encrypted escrow back via cUSDC.transferEncrypted.",
     accent: "emerald-500",
   },
@@ -114,7 +114,7 @@ export function CreSection() {
             {/* Offchain */}
             <div>
               <span className="font-mono text-[9px] uppercase tracking-[0.3em] text-muted-foreground">
-                Off-chain (cofhejs / CoFHE oracle)
+                Off-chain (@cofhe/sdk / CoFHE oracle)
               </span>
               <p className="mt-2 font-mono text-xs text-muted-foreground leading-relaxed">
                 {wf.offchain}

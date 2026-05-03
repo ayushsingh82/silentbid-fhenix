@@ -1,7 +1,7 @@
 import { HardhatUserConfig } from 'hardhat/config'
 import '@nomicfoundation/hardhat-toolbox'
 import '@nomicfoundation/hardhat-ethers'
-import 'cofhe-hardhat-plugin'
+import '@cofhe/hardhat-plugin'
 import * as dotenv from 'dotenv'
 
 dotenv.config()
@@ -17,8 +17,8 @@ const config: HardhatUserConfig = {
       optimizer: { enabled: true, runs: 200 },
     },
   },
-  // @ts-ignore — cofhe field is added by cofhe-hardhat-plugin
-  cofhe: { logMocks: true },
+  // @ts-ignore — cofhe field is added by @cofhe/hardhat-plugin
+  cofhe: { logMocks: true, gasWarning: true },
   networks: {
     'base-sepolia': {
       url: process.env.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org',
@@ -28,8 +28,11 @@ const config: HardhatUserConfig = {
       timeout: 60000,
     },
   },
+  sourcify: {
+    enabled: true,
+  },
   etherscan: {
-    apiKey: process.env.BASESCAN_API_KEY || '',
+    apiKey: 'S1NCJYJ8FER5R28GZUD8NVXFIX549H7RSC',
   },
 }
 

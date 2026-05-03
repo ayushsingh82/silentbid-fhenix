@@ -1,5 +1,5 @@
 import { baseSepolia, type Chain } from "viem/chains"
-import { http } from "wagmi"
+import { fallback, http } from "wagmi"
 
 export const IS_LOCAL = false
 
@@ -16,11 +16,12 @@ export const activeChain = IS_LOCAL ? localChain : baseSepolia
 
 export const chainId = activeChain.id
 
-const baseSepoliaRpc = "https://sepolia.base.org"
-
 export const activeTransport = IS_LOCAL
   ? http("http://127.0.0.1:8545")
-  : http(baseSepoliaRpc)
+  : fallback([
+      http("https://base-sepolia-rpc.publicnode.com"),
+      http("https://sepolia.base.org"),
+    ])
 
 export const blockExplorerUrl = IS_LOCAL ? null : "https://sepolia.basescan.org"
 

@@ -2,8 +2,9 @@
 
 import { useState } from "react"
 import { useAccount, usePublicClient, useReadContract, useWalletClient } from "wagmi"
+import { formatEther } from "viem"
 import { cn } from "@/lib/utils"
-import { ensureCofheInit, getCofhejs } from "@/lib/cofhe"
+import { ensureCofheInit, encryptInputs, getEncryptable } from "@/lib/cofhe"
 import {
   AUCTION_ABI,
   AUCTION_ADDRESS,
@@ -47,13 +48,24 @@ export function PlaceBidForm({
     query: { enabled: !!address && !!CUSDC_ADDRESS, refetchInterval: 10_000 },
   })
 
+  // Read minimum bid gas fee from contract
+  const { data: minBidGasFee } = useReadContract({
+    address: AUCTION_ADDRESS || undefined,
+    abi: AUCTION_ABI,
+    functionName: "minBidGasFee",
+    query: { enabled: !!AUCTION_ADDRESS },
+  })
+
+  const gasFeeWei = (minBidGasFee as bigint | undefined) ?? 500_000_000_000_000n // 0.0005 ETH default
+
   const amtNum = parseFloat(amount)
   const amtRaw =
     Number.isFinite(amtNum) && amtNum > 0
       ? BigInt(Math.floor(amtNum * Number(SCALE)))
       : 0n
+  const ZERO_HANDLE = "0x0000000000000000000000000000000000000000000000000000000000000000"
   const hasSealedBalance =
-    (cUsdcHandle as bigint | undefined) !== undefined && (cUsdcHandle as bigint) !== 0n
+    typeof cUsdcHandle === "string" && cUsdcHandle !== ZERO_HANDLE
 
   const canSubmit =
     isConnected &&
@@ -72,11 +84,9 @@ export function PlaceBidForm({
       await ensureCofheInit(publicClient as never, walletClient)
 
       setStep("encrypt")
-      const { cofhejs, Encryptable } = await getCofhejs()
-      const enc = await cofhejs.encrypt([Encryptable.uint64(amtRaw)] as const)
-      if (enc.error || !enc.data) throw new Error(`encrypt failed: ${JSON.stringify(enc.error)}`)
-      const [encRaw] = enc.data
-      const encAmount = { ...encRaw, signature: encRaw.signature as `0x${string}` }
+      const Encryptable = await getEncryptable()
+      const encrypted = await encryptInputs([Encryptable.uint64(amtRaw)])
+      const encAmount = encrypted[0]
 
       setStep("approve")
       const approveHash = await walletClient.writeContract({
@@ -96,6 +106,7 @@ export function PlaceBidForm({
         abi: AUCTION_ABI,
         functionName: "placeBid",
         args: [auctionId],
+        value: gasFeeWei,
         account: walletClient.account!,
         chain: walletClient.chain,
       })
@@ -139,6 +150,9 @@ export function PlaceBidForm({
           <span className="text-accent">
             {hasSealedBalance ? "encrypted (wrap more if low)" : "0 — wrap USDC first"}
           </span>
+        </p>
+        <p className="mt-1 font-mono text-[10px] text-muted-foreground/50">
+          Gas fee: {formatEther(gasFeeWei)} ETH (covers settlement costs)
         </p>
       </div>
 

@@ -97,7 +97,7 @@ export function ColophonSection() {
             <li className="font-mono text-xs text-foreground/80">Next.js</li>
             <li className="font-mono text-xs text-foreground/80">Tailwind CSS</li>
             <li className="font-mono text-xs text-foreground/80">Fhenix CoFHE</li>
-            <li className="font-mono text-xs text-foreground/80">cofhejs</li>
+            <li className="font-mono text-xs text-foreground/80">@cofhe/sdk</li>
             <li className="font-mono text-xs text-foreground/80">Base Sepolia</li>
           </ul>
         </div>

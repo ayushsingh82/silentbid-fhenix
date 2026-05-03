@@ -4,62 +4,23 @@
  * drives the full flow against the live Fhenix threshold network:
  *
  *   mint → wrap → createAuction → encrypted approve → placeBid
- *   → endAuction (dispatches FHE.decrypt) → poll winnerDecryptReady
- *   → publishWinner → settleBid → revealMyBid → unseal.
+ *   → endAuction (sets FHE.allowPublic) → decryptForTx (signed oracle)
+ *   → finalizeAuction(winner, amount, winnerSig, amountSig) → revealMyBid → unseal.
  *
  * Run:
  *   PRIVATE_KEY=... npx hardhat run scripts/e2e-base-sepolia.ts --network base-sepolia
  */
 
 import hre, { ethers } from 'hardhat'
-import { cofhejs, Encryptable, FheTypes } from 'cofhejs/node'
-import type { AbstractProvider, AbstractSigner } from 'cofhejs/node'
+import { Encryptable, FheTypes } from '@cofhe/sdk'
 import { Wallet } from 'ethers'
 
 const SCALE = 1_000_000n
 
-const USDC_ADDR = '0xF1235b1782D48EbDf23673b115E51d03703463a1'
-const CUSDC_ADDR = '0x651524Af19c2edeb94DE60ECd0B9B361B53AAAFF'
-const AUCTION_ADDR = '0x3199d17cfa7027f91504F960DbCd34D44d284434'
-
-function signerAbstract(s: Wallet): { provider: AbstractProvider; signer: AbstractSigner } {
-  const provider: AbstractProvider = {
-    call: (args) => s.provider!.call(args),
-    getChainId: async () => (await s.provider!.getNetwork()).chainId.toString(),
-    send: async (method: string, params?: unknown[]) =>
-      s.provider!.send(method, (params ?? []) as unknown[]),
-  }
-  const signer: AbstractSigner = {
-    signTypedData: (domain, types, value) => s.signTypedData(domain, types, value),
-    getAddress: () => s.getAddress(),
-    provider,
-    sendTransaction: async (tx) => {
-      const sent = await s.sendTransaction(tx as unknown as never)
-      return sent.hash
-    },
-  }
-  return { provider, signer }
-}
-
-async function initCofheFor(wallet: Wallet) {
-  const { provider, signer } = signerAbstract(wallet)
-  const res = await cofhejs.initialize({
-    provider,
-    signer,
-    environment: 'TESTNET',
-  })
-  if (res.error) throw new Error(`cofhejs init for ${await wallet.getAddress()}: ${JSON.stringify(res.error)}`)
-}
-
-async function unsealWithRetry(handle: bigint, fheType: unknown, attempts = 30, delayMs = 4000): Promise<bigint> {
-  for (let i = 0; i < attempts; i++) {
-    const res = (await cofhejs.unseal(handle, fheType as never)) as { data?: bigint | null }
-    if (res.data !== undefined && res.data !== null) return res.data as bigint
-    process.stdout.write('.')
-    await new Promise((r) => setTimeout(r, delayMs))
-  }
-  throw new Error('cofhejs.unseal still pending')
-}
+const USDC_ADDR = '0xA8269A6Dc3f9AE5936A930e5F8Fa9B17937feE94'
+const CUSDC_ADDR = '0xa1585b1792ed34754BE126584BBDa5CB7e15bA3d'
+const AUCTION_ADDR = process.env.AUCTION_ADDR || '0xbf6b4Dd1E1498f575ffC3722E4350F9C51abEa78'
+const TREASURY_ADDR = process.env.TREASURY_ADDR || '0x1D1494b3a858Ed8b37B362eA6895665FfC71D11B'
 
 async function main() {
   const [deployer] = await ethers.getSigners()
@@ -98,18 +59,17 @@ async function main() {
   console.log('  wrap tx:', wrapTx.hash)
 
   // 3. Seller creates auction (60s min duration required by contract).
-  console.log('\n[4/9] seller createAuction (60s)')
+  console.log('\n[4/9] seller createAuction (60s) with 0.005 ETH gas deposit')
   const duration = 60n
   const createTx = await auction.connect(deployer).createAuction(
     'Smoke Test Lot',
     'Base Sepolia e2e smoke run',
     10n * SCALE,
     duration,
+    { value: ethers.parseEther('0.005') }
   )
   const createRcpt = await createTx.wait()
   console.log('  create tx:', createRcpt!.hash)
-  // Parse AuctionCreated from logs rather than relying on nextAuctionId, since
-  // public RPCs can serve slightly stale state right after a tx lands.
   const createdLog = createRcpt!.logs
     .map((l) => { try { return auction.interface.parseLog(l) } catch { return null } })
     .find((p) => p?.name === 'AuctionCreated')
@@ -117,25 +77,26 @@ async function main() {
   const auctionId = createdLog.args.auctionId as bigint
   console.log('  auctionId =', auctionId.toString())
 
-  // 4. Bidder encrypts approval amount via cofhejs and calls approve.
+  // 4. Bidder encrypts approval amount via @cofhe/sdk and calls approve.
   console.log('\n[5/9] bidder encrypt + approve cUSDC(auction, 125 USDC)')
-  await initCofheFor(bidder)
+  const client = await hre.cofhe.createClientWithBatteries(bidder as never)
   const bidAmtRaw = 125n * SCALE
-  const enc = await cofhejs.encrypt([Encryptable.uint64(bidAmtRaw)] as const)
-  if (enc.error || !enc.data) throw new Error(`encrypt: ${JSON.stringify(enc.error)}`)
-  const [encAmount] = enc.data as unknown as Array<{
-    ctHash: bigint
-    securityZone: number
-    utype: number
-    signature: string
-  }>
-  const approveEncTx = await cusdc.connect(bidder).approve(AUCTION_ADDR, encAmount)
+  const encrypted = await client.encryptInputs([Encryptable.uint64(bidAmtRaw)]).execute()
+  const encAmount = encrypted[0]
+  // Convert ctHash from bigint to bytes32 hex for the contract ABI
+  const encAmountForContract = {
+    ctHash: "0x" + encAmount.ctHash.toString(16).padStart(64, "0") as `0x${string}`,
+    securityZone: encAmount.securityZone,
+    utype: encAmount.utype,
+    signature: encAmount.signature as `0x${string}`,
+  }
+  const approveEncTx = await cusdc.connect(bidder).approve(AUCTION_ADDR, encAmountForContract)
   await approveEncTx.wait()
   console.log('  approve tx:', approveEncTx.hash)
 
   // 5. Bidder placeBid.
-  console.log('\n[6/9] bidder placeBid')
-  const bidTx = await auction.connect(bidder).placeBid(auctionId)
+  console.log('\n[6/9] bidder placeBid with 0.0005 ETH gas fee')
+  const bidTx = await auction.connect(bidder).placeBid(auctionId, { value: ethers.parseEther('0.0005') })
   const bidRcpt = await bidTx.wait()
   console.log('  placeBid tx:', bidRcpt!.hash)
   const bidCount = await auction.bidCount(auctionId)
@@ -155,14 +116,17 @@ async function main() {
   await endTx.wait()
   console.log('  endAuction tx:', endTx.hash)
 
-  // 7. Unseal highest bid + bidder handles client-side via cofhejs. endAuction
-  //    set FHE.allowGlobal on both, so the seller (or anyone) can unseal.
-  console.log('\n[8/9] client-side unseal (cofhejs) of winning bid + bidder')
-  const sellerWallet = new Wallet(process.env.PRIVATE_KEY!, provider)
-  await initCofheFor(sellerWallet)
+  // 7. Decrypt handles via CoFHE oracle (decryptForTx returns signed plaintext).
+  console.log('\n[8/9] decryptForTx of winning bid + bidder via CoFHE oracle')
   const endInfo = await auction.getAuction(auctionId)
-  const winnerAmount = await unsealWithRetry(BigInt(endInfo.highestBidHandle as bigint), FheTypes.Uint64)
-  const winnerAddrRaw = await unsealWithRetry(BigInt(endInfo.highestBidderHandle as bigint), FheTypes.Uint256)
+  const highestBidHandle = endInfo.highestBidHandle as string
+  const highestBidderHandle = endInfo.highestBidderHandle as string
+
+  const bidResult = await client.decryptForTx(highestBidHandle).withoutPermit().execute()
+  const bidderResult = await client.decryptForTx(highestBidderHandle).withoutPermit().execute()
+
+  const winnerAmount = bidResult.decryptedValue as bigint
+  const winnerAddrRaw = bidderResult.decryptedValue as bigint
   const winnerAddr = ethers.getAddress('0x' + winnerAddrRaw.toString(16).padStart(40, '0'))
   console.log('  winnerAmount =', winnerAmount.toString(), ' winnerAddr =', winnerAddr)
   if (winnerAddr.toLowerCase() !== bidder.address.toLowerCase()) {
@@ -172,20 +136,21 @@ async function main() {
     throw new Error(`wrong amount — expected ${bidAmtRaw}, got ${winnerAmount}`)
   }
 
-  // 8. publishWinner(auctionId, winner, amount).
-  console.log('\n[9/9] publishWinner + settleBid + revealMyBid + unseal')
-  const pubTx = await auction.connect(deployer).publishWinner(auctionId, winnerAddr, winnerAmount)
+  // 8. finalizeAuction with oracle signatures.
+  console.log('\n[9/9] finalizeAuction + revealMyBid + unseal')
+  const pubTx = await auction.connect(deployer).finalizeAuction(
+    auctionId,
+    winnerAddr,
+    winnerAmount,
+    bidderResult.signature,
+    bidResult.signature,
+  )
   await pubTx.wait()
-  console.log('  publishWinner tx:', pubTx.hash)
+  console.log('  finalizeAuction tx:', pubTx.hash)
 
   const published = await auction.getAuction(auctionId)
   console.log('  winnerPlain =', published.winnerPlain)
   console.log('  winningAmountPlain =', published.winningAmountPlain.toString())
-
-  // Settle the single bid (winner, so seller receives).
-  const settleTx = await auction.connect(deployer).settleBid(auctionId, 0)
-  await settleTx.wait()
-  console.log('  settleBid tx:', settleTx.hash)
 
   // Reveal + unseal as the bidder.
   const revealTx = await auction.connect(bidder).revealMyBid(auctionId, 0)
@@ -193,15 +158,15 @@ async function main() {
   console.log('  revealMyBid tx:', revealTx.hash)
 
   const [, bidHandle] = await auction.getBid(auctionId, 0)
-  const unsealed = await unsealWithRetry(BigInt(bidHandle), FheTypes.Uint64)
-  console.log('  unsealed own bid =', unsealed.toString())
-  if (unsealed !== bidAmtRaw) throw new Error('unseal mismatch')
+  const unsealed = await client.decryptForView(bidHandle as string, FheTypes.Uint64).execute()
+  console.log('  unsealed own bid =', (unsealed as bigint).toString())
+  if ((unsealed as bigint) !== bidAmtRaw) throw new Error('unseal mismatch')
 
   // Reconcile balances.
-  const sellerCUsdcHandle = (await cusdc.balanceOf(deployer.address)) as unknown as bigint
-  console.log('  seller cUSDC handle =', sellerCUsdcHandle.toString())
-  const sellerPlain = await unsealWithRetry(sellerCUsdcHandle, FheTypes.Uint64)
-  console.log('  seller cUSDC plaintext =', sellerPlain.toString(), `(expected at least ${bidAmtRaw})`)
+  const sellerCUsdcHandle = await cusdc.balanceOf(deployer.address) as string
+  console.log('  seller cUSDC handle =', sellerCUsdcHandle)
+  const sellerPlain = await client.decryptForView(sellerCUsdcHandle, FheTypes.Uint64).execute()
+  console.log('  seller cUSDC plaintext =', (sellerPlain as bigint).toString(), `(expected roughly ${bidAmtRaw} minus fee)`)
 
   console.log('\n✅ end-to-end on Base Sepolia passed')
 }

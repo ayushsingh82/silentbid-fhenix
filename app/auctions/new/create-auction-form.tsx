@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { useAccount, usePublicClient, useWalletClient } from "wagmi"
-import { decodeEventLog } from "viem"
+import { useAccount, usePublicClient, useReadContract, useWalletClient } from "wagmi"
+import { decodeEventLog, parseEther, formatEther } from "viem"
 import { cn } from "@/lib/utils"
 import {
   AUCTION_ABI,
@@ -29,8 +29,17 @@ export function CreateAuctionForm() {
   const [itemDescription, setItemDescription] = useState("")
   const [floor, setFloor] = useState("")
   const [durationSec, setDurationSec] = useState(DURATION_PRESETS[1].seconds)
+  const [gasDeposit, setGasDeposit] = useState("0.005")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Read minimum gas deposit from contract
+  const { data: minGasDeposit } = useReadContract({
+    address: AUCTION_ADDRESS || undefined,
+    abi: AUCTION_ABI,
+    functionName: "minGasDeposit",
+    query: { enabled: !!AUCTION_ADDRESS },
+  })
 
   const minBidRaw = (() => {
     const n = parseFloat(floor)
@@ -38,12 +47,23 @@ export function CreateAuctionForm() {
     return BigInt(Math.floor(n * Number(SCALE)))
   })()
 
+  const gasDepositWei = (() => {
+    const n = parseFloat(gasDeposit)
+    if (!Number.isFinite(n) || n <= 0) return 0n
+    return parseEther(gasDeposit)
+  })()
+
+  const minDepositWei = (minGasDeposit as bigint | undefined) ?? parseEther("0.005")
+  const depositTooLow = gasDepositWei < minDepositWei
+
   const canSubmit =
     isConnected &&
     !!AUCTION_ADDRESS &&
     itemName.trim().length > 0 &&
     durationSec >= 60 &&
-    !submitting
+    !submitting &&
+    gasDepositWei > 0n &&
+    !depositTooLow
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -56,6 +76,7 @@ export function CreateAuctionForm() {
         abi: AUCTION_ABI,
         functionName: "createAuction",
         args: [itemName.trim(), itemDescription.trim(), minBidRaw, BigInt(durationSec)],
+        value: gasDepositWei,
         account: walletClient.account!,
         chain: walletClient.chain,
       })
@@ -131,7 +152,7 @@ export function CreateAuctionForm() {
           className="w-full bg-background border border-border/40 px-4 py-3 font-mono text-sm focus:outline-none focus:border-accent/60"
         />
         <p className="mt-2 font-mono text-[10px] text-muted-foreground/70">
-          Shown on the auction page for bidders — not enforced on-chain (bids are encrypted).
+          Shown on the auction page for bidders — enforced on-chain via FHE.
         </p>
       </div>
 
@@ -156,6 +177,29 @@ export function CreateAuctionForm() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div>
+        <label className="block font-mono text-[10px] uppercase tracking-[0.3em] text-accent mb-3">
+          Gas deposit (ETH)
+        </label>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={gasDeposit}
+          onChange={(e) => setGasDeposit(e.target.value.replace(/[^0-9.]/g, ""))}
+          placeholder="0.005"
+          className="w-full bg-background border border-border/40 px-4 py-3 font-mono text-sm focus:outline-none focus:border-accent/60"
+        />
+        <p className="mt-2 font-mono text-[10px] text-muted-foreground/70">
+          Covers gas for automated settlement after auction ends.
+          Min: {formatEther(minDepositWei)} ETH. Unused portion is refunded.
+        </p>
+        {depositTooLow && gasDepositWei > 0n && (
+          <p className="mt-1 font-mono text-[10px] text-destructive">
+            Below minimum deposit of {formatEther(minDepositWei)} ETH.
+          </p>
+        )}
       </div>
 
       {error && (

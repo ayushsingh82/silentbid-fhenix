@@ -35,7 +35,7 @@ const nextConfig: NextConfig = {
       // wagmi@3 metaMask connector imports an EVM helper that only ships on
       // later versions of @metamask/sdk. Not used by our flow.
       "@metamask/connect-evm": false,
-      // cofhejs/web.mjs has a node-only `fs` import guarded at runtime.
+      // @cofhe/sdk/web has a node-only `fs` import guarded at runtime.
       "fs": false,
     };
     return config;

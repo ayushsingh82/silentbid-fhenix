@@ -1,118 +1,100 @@
 "use client"
 
 /**
- * cofhejs loader + viem→cofhejs adapter. The SDK ships a big WASM bundle and
- * its own FHE keys, so we load it lazily — pages that never touch FHE stay
- * lean. Ported from fhe-giftcards/packages/app/src/lib/cofhe.ts.
+ * @cofhe/sdk loader + client singleton. The SDK ships a big WASM bundle and
+ * its own FHE keys, so we load it lazily — pages that never touch FHE stay lean.
  */
 
-import type { AbstractProvider, AbstractSigner } from "cofhejs/web"
 import type { PublicClient, WalletClient } from "viem"
 
-type CofhejsNs = typeof import("cofhejs/web")
+// Lazy-loaded SDK modules
+let sdkModule: typeof import("@cofhe/sdk/web") | null = null
+let chainsModule: typeof import("@cofhe/sdk/chains") | null = null
 
-let lazy: Promise<CofhejsNs> | null = null
-function loadCofhejs(): Promise<CofhejsNs> {
-  if (!lazy) lazy = import("cofhejs/web")
-  return lazy
+async function loadSdk() {
+  if (!sdkModule) {
+    const [sdk, chains] = await Promise.all([
+      import("@cofhe/sdk/web"),
+      import("@cofhe/sdk/chains"),
+    ])
+    sdkModule = sdk
+    chainsModule = chains
+  }
+  return { sdk: sdkModule!, chains: chainsModule! }
 }
 
-function wrap(
-  publicClient: PublicClient,
-  walletClient: WalletClient,
-): { provider: AbstractProvider; signer: AbstractSigner } {
-  const provider: AbstractProvider = {
-    call: async ({ to, data }) => {
-      const result = await publicClient.call({
-        to: to as `0x${string}`,
-        data: data as `0x${string}`,
-      })
-      return result.data ?? "0x"
-    },
-    getChainId: async () => String(await publicClient.getChainId()),
-    send: async (method: string, params?: unknown[]) =>
-      publicClient.request({
-        method: method as never,
-        params: params as never,
-      }) as unknown as Promise<unknown>,
-  }
+// Singleton client
+let client: Awaited<ReturnType<typeof createClient>> | null = null
+let connectedFor: string | null = null
 
-  const signer: AbstractSigner = {
-    signTypedData: async (domain, types, value) =>
-      (walletClient as unknown as {
-        signTypedData: (args: {
-          account: unknown
-          domain: unknown
-          types: unknown
-          primaryType: string
-          message: unknown
-        }) => Promise<`0x${string}`>
-      }).signTypedData({
-        account: walletClient.account!,
-        domain,
-        types,
-        primaryType: Object.keys(types as Record<string, unknown>)[0] ?? "",
-        message: value,
-      }),
-    getAddress: async () => walletClient.account!.address,
-    provider,
-    sendTransaction: async (tx) => {
-      const loose = tx as Record<string, unknown>
-      const hash = await walletClient.sendTransaction({
-        account: walletClient.account!,
-        to: loose.to as `0x${string}`,
-        data: loose.data as `0x${string}` | undefined,
-        value: loose.value ? BigInt(String(loose.value)) : undefined,
-        chain: null,
-      })
-      return hash
-    },
-  }
-
-  return { provider, signer }
+async function createClient() {
+  const { sdk, chains } = await loadSdk()
+  const config = sdk.createCofheConfig({
+    environment: "web",
+    supportedChains: [chains.baseSepolia],
+  })
+  return sdk.createCofheClient(config)
 }
 
-let initializedFor: string | null = null
+async function getClient(): Promise<NonNullable<typeof client>> {
+  if (!client) client = await createClient()
+  return client
+}
 
-/** Initialise cofhejs for this wallet (no-op if already done for this address). */
+/** Initialise the CoFHE client for this wallet (no-op if already done). */
 export async function ensureCofheInit(
   publicClient: PublicClient,
   walletClient: WalletClient,
 ) {
   const address = walletClient.account?.address
   if (!address) throw new Error("wallet not connected")
-  if (initializedFor === address) return
+  if (connectedFor === address) return
 
-  const { cofhejs } = await loadCofhejs()
-  const { provider, signer } = wrap(publicClient, walletClient)
-  const result = await cofhejs.initialize({ provider, signer, environment: "TESTNET" })
-  if (result.error) {
-    const err = result.error as { code?: string; message?: string; cause?: unknown }
-    const inner = err.cause instanceof Error ? ` — ${err.cause.message}` : ""
-    console.error("[cofhejs init error]", err)
-    throw new Error(`cofhejs init failed [${err.code ?? "?"}]: ${err.message ?? "unknown"}${inner}`)
-  }
-  initializedFor = address
+  const c = await getClient()
+  await c.connect(publicClient as never, walletClient as never)
+  // Create (or reuse) a self-permit — required by decryptForView.
+  // This prompts the user to sign an EIP-712 permit message the first time.
+  await c.permits.getOrCreateSelfPermit()
+  connectedFor = address
 }
 
-export async function getCofhejs(): Promise<CofhejsNs> {
-  return loadCofhejs()
+/** Encrypt values client-side. Returns encrypted input structs for contract calls. */
+export async function encryptInputs(
+  items: Array<ReturnType<typeof import("@cofhe/sdk")["Encryptable"]["uint64"]>>,
+) {
+  const c = await getClient()
+  const results = await c.encryptInputs(items).execute()
+  // SDK returns ctHash as bigint, which maps perfectly to the uint256 expected by CoFHE v0.1.3 contracts
+  return results.map((r: { ctHash: bigint; securityZone: number; utype: number; signature: string }) => ({
+    ctHash: r.ctHash,
+    securityZone: r.securityZone,
+    utype: r.utype,
+    signature: r.signature as `0x${string}`,
+  }))
 }
 
-/** Retry cofhejs.unseal up to 10× (2.5s each) to survive the async oracle delay. */
-export async function unsealWithRetry(
-  handle: bigint,
-  fheType: unknown,
-  attempts = 10,
-  delayMs = 2500,
+/** Decrypt a ciphertext handle for off-chain viewing (no on-chain effect). */
+export async function decryptForView(
+  ctHash: bigint | string,
+  fheType: number,
 ): Promise<bigint> {
-  const { cofhejs } = await getCofhejs()
-  for (let i = 0; i < attempts; i++) {
-    const res = (await cofhejs.unseal(handle, fheType as never)) as {
-      data?: bigint | null
-    }
-    if (res.data !== undefined && res.data !== null) return res.data as bigint
-    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs))
-  }
-  throw new Error("Decryption still pending — try again in a moment")
+  const c = await getClient()
+  return c.decryptForView(ctHash, fheType).withPermit().execute() as unknown as Promise<bigint>
+}
+
+/** Decrypt a ciphertext handle for on-chain use (returns signature for publishDecryptResult). */
+export async function decryptForTx(ctHash: bigint | string) {
+  const c = await getClient()
+  return c.decryptForTx(ctHash).withoutPermit().execute()
+}
+
+/** Re-export SDK types for convenience. */
+export async function getEncryptable() {
+  const mod = await import("@cofhe/sdk")
+  return mod.Encryptable
+}
+
+export async function getFheTypes() {
+  const mod = await import("@cofhe/sdk")
+  return mod.FheTypes
 }

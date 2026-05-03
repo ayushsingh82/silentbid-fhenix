@@ -30,7 +30,7 @@ contract ConfidentialUSDC {
     uint256 public nextUnwrapId;
 
     event Wrap(address indexed from, uint256 amount);
-    event UnwrapRequested(uint256 indexed unwrapId, address indexed from, uint256 encAmountHandle);
+    event UnwrapRequested(uint256 indexed unwrapId, address indexed from, bytes32 encAmountHandle);
     event UnwrapClaimed(uint256 indexed unwrapId, address indexed to, uint256 amount);
     event Transfer(address indexed from, address indexed to);
     event Approval(address indexed owner, address indexed spender);

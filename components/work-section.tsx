@@ -11,7 +11,7 @@ const experiments = [
   {
     title: "FHE Sealed Bids",
     medium: "Core Mechanism",
-    description: "Fhenix CoFHE treats ciphertexts as first-class Solidity types. You encrypt your bid client-side with cofhejs; the contract accepts an euint64 and never sees plaintext. The running max is tracked via FHE.max + FHE.select, replacing the old off-chain confidential-compute bidding flow.",
+    description: "Fhenix CoFHE treats ciphertexts as first-class Solidity types. You encrypt your bid client-side with @cofhe/sdk; the contract accepts an euint64 and never sees plaintext. The running max is tracked via FHE.max + FHE.select, replacing the old off-chain confidential-compute bidding flow.",
     span: "col-span-2 row-span-2",
   },
   {

@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useAccount, usePublicClient, useReadContract, useWalletClient } from "wagmi"
 import { decodeEventLog } from "viem"
 import { cn } from "@/lib/utils"
-import { ensureCofheInit, getCofhejs, unsealWithRetry } from "@/lib/cofhe"
+import { ensureCofheInit, encryptInputs, decryptForView, getEncryptable, getFheTypes } from "@/lib/cofhe"
 import {
   CUSDC_ABI,
   CUSDC_ADDRESS,
@@ -25,7 +25,7 @@ export function WalletPanel() {
   const [amount, setAmount] = useState("50")
   const [busy, setBusy] = useState<"mint" | "wrap" | "unwrap" | "reveal" | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [revealed, setRevealed] = useState<{ handle: bigint; value: bigint } | null>(null)
+  const [revealed, setRevealed] = useState<{ handle: string; value: bigint } | null>(null)
 
   const { data: usdcBalance, refetch: refetchUsdc } = useReadContract({
     address: USDC_ADDRESS || undefined,
@@ -43,8 +43,8 @@ export function WalletPanel() {
     query: { enabled: !!address && !!CUSDC_ADDRESS, refetchInterval: 10_000 },
   })
 
-  const handle = (cUsdcHandle as bigint | undefined) ?? 0n
-  const hasSealed = handle > 0n
+  const handle = (cUsdcHandle as string | undefined) ?? "0x0000000000000000000000000000000000000000000000000000000000000000"
+  const hasSealed = handle !== "0x0000000000000000000000000000000000000000000000000000000000000000"
   const revealedForCurrent = revealed && revealed.handle === handle ? revealed.value : null
 
   const amtNum = parseFloat(amount)
@@ -128,11 +128,10 @@ export function WalletPanel() {
     try {
       setBusy("unwrap")
       await ensureCofheInit(publicClient as never, walletClient)
-      const { cofhejs, Encryptable, FheTypes } = await getCofhejs()
-      const enc = await cofhejs.encrypt([Encryptable.uint64(amtRaw)] as const)
-      if (enc.error || !enc.data) throw new Error(`encrypt failed: ${JSON.stringify(enc.error)}`)
-      const [encRaw] = enc.data
-      const encAmount = { ...encRaw, signature: encRaw.signature as `0x${string}` }
+      const Encryptable = await getEncryptable()
+      const FheTypes = await getFheTypes()
+      const encrypted = await encryptInputs([Encryptable.uint64(amtRaw)])
+      const encAmount = encrypted[0]
 
       const reqHash = await walletClient.writeContract({
         address: CUSDC_ADDRESS,
@@ -152,8 +151,8 @@ export function WalletPanel() {
         })
         .find((d) => d?.eventName === "UnwrapRequested")
       if (!evt || !evt.args) throw new Error("UnwrapRequested event missing")
-      const args = evt.args as { unwrapId: bigint; encAmountHandle: bigint }
-      const plain = await unsealWithRetry(args.encAmountHandle, FheTypes.Uint64)
+      const args = evt.args as { unwrapId: bigint; encAmountHandle: string }
+      const plain = (await decryptForView(args.encAmountHandle, FheTypes.Uint64)) as bigint
 
       const cHash = await walletClient.writeContract({
         address: CUSDC_ADDRESS,
@@ -180,9 +179,9 @@ export function WalletPanel() {
     try {
       setBusy("reveal")
       await ensureCofheInit(publicClient as never, walletClient)
-      const { FheTypes } = await getCofhejs()
-      const plain = await unsealWithRetry(handle, FheTypes.Uint64)
-      setRevealed({ handle, value: plain })
+      const FheTypes = await getFheTypes()
+      const plain = (await decryptForView(handle, FheTypes.Uint64)) as bigint
+      setRevealed({ handle, value: plain as bigint })
     } catch (err) {
       setError(err instanceof Error ? err.message.slice(0, 140) : "Reveal failed")
     } finally {
@@ -244,7 +243,7 @@ export function WalletPanel() {
                   : "****"}
           </p>
           <p className="mt-2 font-mono text-[9px] text-muted-foreground/50 break-all">
-            {hasSealed ? `handle #${handle.toString().slice(0, 14)}…` : "no sealed balance"}
+            {hasSealed ? `handle ${handle.slice(0, 14)}…` : "no sealed balance"}
           </p>
         </div>
       </div>

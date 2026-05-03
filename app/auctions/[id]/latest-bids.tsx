@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { usePublicClient, useWalletClient } from "wagmi"
+import { useAccount, usePublicClient, useWalletClient } from "wagmi"
 import { type Address, parseAbiItem } from "viem"
 import {
   AUCTION_ABI,
@@ -9,21 +9,21 @@ import {
   formatUsdc,
 } from "@/lib/fhenix-contracts"
 import { chainId, blockExplorerUrl } from "@/lib/chain-config"
-import { ensureCofheInit, getCofhejs, unsealWithRetry } from "@/lib/cofhe"
+import { ensureCofheInit, decryptForView, getFheTypes } from "@/lib/cofhe"
 
 type BidRow = {
   index: bigint
   bidder: Address
-  encAmountHandle: bigint
+  encAmountHandle: string  // bytes32 hex
   blockNumber: bigint
   revealed: boolean
 }
 
 const BID_PLACED_EVENT = parseAbiItem(
-  "event BidPlaced(uint256 indexed auctionId, uint256 indexed bidIndex, address indexed bidder, uint256 encAmountHandle)",
+  "event BidPlaced(uint256 indexed auctionId, uint256 indexed bidIndex, address indexed bidder, bytes32 encAmountHandle)",
 )
 
-const LOG_CHUNK = 9000n
+const LOG_CHUNK = 1000n
 
 function shortAddress(addr: Address): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
@@ -36,6 +36,7 @@ export function LatestBids({
   auctionId: bigint
   refreshKey: number
 }) {
+  const { address: myAddr } = useAccount()
   const publicClient = usePublicClient({ chainId })
   const { data: walletClient } = useWalletClient()
   const [rows, setRows] = useState<BidRow[]>([])
@@ -43,40 +44,65 @@ export function LatestBids({
   const [error, setError] = useState<string | null>(null)
   const [unsealed, setUnsealed] = useState<Record<string, bigint>>({})
   const [unsealingIndex, setUnsealingIndex] = useState<bigint | null>(null)
+  const [loadTimeout, setLoadTimeout] = useState(false)
+
+  // Timeout for stuck loading
+  useEffect(() => {
+    if (!loading || loadTimeout) return
+    const timeout = setTimeout(() => setLoadTimeout(true), 8000)
+    return () => clearTimeout(timeout)
+  }, [loading, loadTimeout])
 
   useEffect(() => {
-    if (!publicClient || !AUCTION_ADDRESS) return
+    if (!publicClient || !AUCTION_ADDRESS) {
+      if (loading && !AUCTION_ADDRESS) {
+        setError("Auction contract address not configured")
+        setLoading(false)
+      }
+      return
+    }
     let cancelled = false
 
     async function load() {
       try {
         setLoading(true)
         setError(null)
+        setLoadTimeout(false)
 
         const latest = await publicClient!.getBlockNumber()
         const logs: Array<{
           bidIndex: bigint
           bidder: Address
-          encAmountHandle: bigint
+          encAmountHandle: string
           blockNumber: bigint
         }> = []
-        let from = 0n
+        
+        // Start from a recent block to avoid scanning entire chain history
+        // Going back ~7 days of blocks (estimate: ~50k blocks per week on Base Sepolia)
+        const startBlock = Math.max(0, Number(latest) - 100000)
+        let from = BigInt(startBlock)
+        
         while (from <= latest) {
           const to = from + LOG_CHUNK - 1n > latest ? latest : from + LOG_CHUNK - 1n
-          const chunk = await publicClient!.getLogs({
-            address: AUCTION_ADDRESS,
-            event: BID_PLACED_EVENT,
-            args: { auctionId },
-            fromBlock: from,
-            toBlock: to,
-          })
-          for (const log of chunk) {
-            logs.push({
-              bidIndex: (log.args as { bidIndex: bigint }).bidIndex,
-              bidder: (log.args as { bidder: Address }).bidder,
-              encAmountHandle: (log.args as { encAmountHandle: bigint }).encAmountHandle,
-              blockNumber: log.blockNumber ?? 0n,
+          try {
+            const chunk = await publicClient!.getLogs({
+              address: AUCTION_ADDRESS,
+              event: BID_PLACED_EVENT,
+              args: { auctionId },
+              fromBlock: from,
+              toBlock: to,
             })
+            for (const log of chunk) {
+              logs.push({
+                bidIndex: (log.args as { bidIndex: bigint }).bidIndex,
+                bidder: (log.args as { bidder: Address }).bidder,
+                encAmountHandle: (log.args as { encAmountHandle: string }).encAmountHandle,
+                blockNumber: log.blockNumber ?? 0n,
+              })
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch logs from ${from} to ${to}:`, err)
+            // Continue with next chunk despite errors
           }
           from = to + 1n
         }
@@ -89,7 +115,7 @@ export function LatestBids({
               abi: AUCTION_ABI,
               functionName: "getBid",
               args: [auctionId, l.bidIndex],
-            })) as [Address, bigint, boolean, boolean]
+            })) as [Address, string, boolean, boolean]
             return {
               index: l.bidIndex,
               bidder: l.bidder,
@@ -103,7 +129,15 @@ export function LatestBids({
         hydrated.sort((a, b) => Number(a.index - b.index))
         setRows(hydrated)
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load bids")
+        const message = err instanceof Error ? err.message : "Failed to load bids"
+        console.error("LatestBids error:", err)
+        if (!cancelled) {
+          setError(
+            message.includes("getLogs") || message.includes("timeout")
+              ? "Network timeout loading bids. Try refreshing the page."
+              : message
+          )
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -117,14 +151,15 @@ export function LatestBids({
 
   const revealedRows = useMemo(() => rows.filter((r) => r.revealed), [rows])
 
+  // Only allow unsealing your own revealed bids
   async function handleUnseal(row: BidRow) {
     if (!publicClient || !walletClient) return
     setUnsealingIndex(row.index)
     try {
       await ensureCofheInit(publicClient as never, walletClient)
-      const { FheTypes } = await getCofhejs()
-      const plain = await unsealWithRetry(row.encAmountHandle, FheTypes.Uint64)
-      setUnsealed((u) => ({ ...u, [row.index.toString()]: plain }))
+      const FheTypes = await getFheTypes()
+      const plain = (await decryptForView(row.encAmountHandle, FheTypes.Uint64)) as bigint
+      setUnsealed((u) => ({ ...u, [row.index.toString()]: plain as bigint }))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unseal failed")
     } finally {
@@ -134,14 +169,33 @@ export function LatestBids({
 
   if (loading) {
     return (
-      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground animate-pulse">
-        Loading sealed bids…
+      <div className="space-y-2">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground animate-pulse">
+          Loading sealed bids…
+        </div>
+        <div className="space-y-1">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="h-8 bg-muted/20 animate-pulse border border-border/20 rounded" />
+          ))}
+        </div>
+        {loadTimeout && (
+          <div className="mt-3 border border-yellow-500/40 bg-yellow-500/10 p-3 rounded">
+            <p className="font-mono text-[10px] text-yellow-600 dark:text-yellow-500">
+              Taking longer than expected. Check your connection.
+            </p>
+          </div>
+        )}
       </div>
     )
   }
 
   if (error) {
-    return <p className="font-mono text-xs text-destructive/80 break-all">{error}</p>
+    return (
+      <div className="border border-destructive/50 bg-destructive/10 p-3 rounded">
+        <p className="font-mono text-xs text-destructive/80 break-all">{error}</p>
+        <p className="font-mono text-[10px] text-destructive/60 mt-2">Make sure you're connected to Base Sepolia.</p>
+      </div>
+    )
   }
 
   if (rows.length === 0) {
@@ -166,6 +220,7 @@ export function LatestBids({
           {rows.map((row) => {
             const key = row.index.toString()
             const plain = unsealed[key]
+            const isMyBid = myAddr && row.bidder.toLowerCase() === myAddr.toLowerCase()
             return (
               <tr key={key} className="border-b border-border/30 hover:bg-muted/20">
                 <td className="py-2 px-3 text-muted-foreground">{key}</td>
@@ -182,11 +237,14 @@ export function LatestBids({
                   ) : (
                     <span className="text-accent">{shortAddress(row.bidder)}</span>
                   )}
+                  {isMyBid && (
+                    <span className="ml-1 text-purple-400 text-[9px] uppercase tracking-widest">you</span>
+                  )}
                 </td>
                 <td className="py-2 px-3 text-foreground">
                   {plain !== undefined ? (
                     <span>{formatUsdc(plain, 2)} USDC</span>
-                  ) : row.revealed ? (
+                  ) : row.revealed && isMyBid ? (
                     <button
                       type="button"
                       disabled={unsealingIndex === row.index}
@@ -195,9 +253,13 @@ export function LatestBids({
                     >
                       {unsealingIndex === row.index ? "unsealing…" : "unseal"}
                     </button>
+                  ) : row.revealed ? (
+                    <span className="text-muted-foreground/60 text-[10px] uppercase tracking-widest">
+                      revealed
+                    </span>
                   ) : (
                     <span className="text-purple-400 text-[10px] uppercase tracking-widest">
-                      encrypted
+                      ••••• USDC (encrypted)
                     </span>
                   )}
                 </td>

@@ -7,7 +7,7 @@ import { type Address, parseAbiItem } from "viem"
 import { ConnectButtonWrapper } from "@/components/connect-button"
 import { SilentBidLogo } from "@/components/silentbid-logo"
 import { cn } from "@/lib/utils"
-import { ensureCofheInit, getCofhejs, unsealWithRetry } from "@/lib/cofhe"
+import { ensureCofheInit, decryptForView, getFheTypes } from "@/lib/cofhe"
 import { chainId, blockExplorerUrl, networkName } from "@/lib/chain-config"
 import {
   AUCTION_ABI,
@@ -19,7 +19,7 @@ import {
 } from "@/lib/fhenix-contracts"
 
 const BID_PLACED_EVENT = parseAbiItem(
-  "event BidPlaced(uint256 indexed auctionId, uint256 indexed bidIndex, address indexed bidder, uint256 encAmountHandle)",
+  "event BidPlaced(uint256 indexed auctionId, uint256 indexed bidIndex, address indexed bidder, bytes32 encAmountHandle)",
 )
 
 const LOG_CHUNK = 9000n
@@ -27,7 +27,7 @@ const LOG_CHUNK = 9000n
 type Row = {
   auctionId: bigint
   bidIndex: bigint
-  encHandle: bigint
+  encHandle: string  // bytes32 hex
   revealed: boolean
   refunded: boolean
   blockNumber: bigint
@@ -60,7 +60,7 @@ export default function MyBidsPage() {
         const logs: Array<{
           auctionId: bigint
           bidIndex: bigint
-          encHandle: bigint
+          encHandle: string
           blockNumber: bigint
         }> = []
         let from = 0n
@@ -77,7 +77,7 @@ export default function MyBidsPage() {
             const a = log.args as {
               auctionId: bigint
               bidIndex: bigint
-              encAmountHandle: bigint
+              encAmountHandle: string
             }
             logs.push({
               auctionId: a.auctionId,
@@ -97,7 +97,7 @@ export default function MyBidsPage() {
                 abi: AUCTION_ABI,
                 functionName: "getBid",
                 args: [l.auctionId, l.bidIndex],
-              }) as Promise<[Address, bigint, boolean, boolean]>,
+              }) as Promise<[Address, string, boolean, boolean]>,
               publicClient!.readContract({
                 address: AUCTION_ADDRESS,
                 abi: AUCTION_ABI,
@@ -158,8 +158,8 @@ export default function MyBidsPage() {
         )
       }
       await ensureCofheInit(publicClient as never, walletClient)
-      const { FheTypes } = await getCofhejs()
-      const plain = await unsealWithRetry(row.encHandle, FheTypes.Uint64)
+      const FheTypes = await getFheTypes()
+      const plain = (await decryptForView(row.encHandle, FheTypes.Uint64)) as bigint
       setRevealed((r) => ({ ...r, [key]: plain }))
     } catch (err) {
       setError(err instanceof Error ? err.message.slice(0, 240) : "reveal failed")
@@ -171,7 +171,7 @@ export default function MyBidsPage() {
   const summary = useMemo(() => {
     const total = rows.length
     const open = rows.filter((r) => auctionStatus(r.auction) === "active").length
-    const settled = rows.filter((r) => r.auction.winnerPublished).length
+    const settled = rows.filter((r) => r.auction.finalized).length
     return { total, open, settled }
   }, [rows])
 
@@ -192,7 +192,7 @@ export default function MyBidsPage() {
         </h1>
         <p className="mt-3 max-w-xl font-mono text-sm text-muted-foreground">
           Every bid you&apos;ve placed on {networkName}. Amounts stay encrypted unless you choose to
-          reveal them.
+          reveal and unseal your own bid.
         </p>
 
         <div className="mt-10 grid grid-cols-3 gap-4 font-mono max-w-lg">
@@ -240,7 +240,7 @@ export default function MyBidsPage() {
               const plain = revealed[key]
               const status = auctionStatus(row.auction)
               const isWinner =
-                row.auction.winnerPublished &&
+                row.auction.finalized &&
                 address &&
                 row.auction.winnerPlain.toLowerCase() === address.toLowerCase()
               return (
