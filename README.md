@@ -90,7 +90,7 @@ Three security issues were identified and fixed:
 |----------|---------|--------|------|
 | MockUSDC | [`0xA8269A6Dc3f9AE5936A930e5F8Fa9B17937feE94`](https://sepolia.basescan.org/address/0xA8269A6Dc3f9AE5936A930e5F8Fa9B17937feE94) | Deployed | 1,884 bytes |
 | ConfidentialUSDC (cUSDC) | [`0xa1585b1792ed34754BE126584BBDa5CB7e15bA3d`](https://sepolia.basescan.org/address/0xa1585b1792ed34754BE126584BBDa5CB7e15bA3d) | Deployed | 5,641 bytes |
-| SilentBidAuction | [`0xbf6b4Dd1E1498f575ffC3722E4350F9C51abEa78`](https://sepolia.basescan.org/address/0xbf6b4Dd1E1498f575ffC3722E4350F9C51abEa78) | Deployed | 10,534 bytes |
+| SilentBidAuction | [`0x2e396E1f8Bba845a6dAF481099452B360b8b26DE`](https://sepolia.basescan.org/address/0x2e396E1f8Bba845a6dAF481099452B360b8b26DE#code) | Deployed + Verified | 10,535 bytes |
 | Treasury | [`0x1D1494b3a858Ed8b37B362eA6895665FfC71D11B`](https://sepolia.basescan.org/address/0x1D1494b3a858Ed8b37B362eA6895665FfC71D11B) | Deployed | 1,471 bytes |
 | Unwrap Keeper | [`0xf43F4FC18BaCEFE1C96e4FA6bdc8585FBAEd4Cf7`](https://sepolia.basescan.org/address/0xf43F4FC18BaCEFE1C96e4FA6bdc8585FBAEd4Cf7) | Deployed | - |
 

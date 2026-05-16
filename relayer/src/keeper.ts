@@ -46,10 +46,11 @@ export type ActionResult = {
 }
 
 // CoFHE threshold network indexing lag after FHE.allowPublic. The SDK
-// retries decryptForTx internally (every ~2-3s) until this budget elapses.
-// 90s covers ~p99 of observed indexing windows in one call — avoids the
-// 5s/cycle gap the poll loop would otherwise add by retrying.
-const COFHE_ORACLE_WAIT_MS = 90_000
+// retries decryptForTx internally until this budget elapses. Short value
+// is fine because the background poll loop retries every 5s, so if the
+// oracle isn't ready yet we try again on the next tick rather than
+// holding a single request open.
+const COFHE_ORACLE_WAIT_MS = 30_000
 
 export type KeeperConfig = {
   privateKey: `0x${string}`

@@ -126,7 +126,7 @@ export function LatestBids({
           }),
         )
         if (cancelled) return
-        hydrated.sort((a, b) => Number(a.index - b.index))
+        hydrated.sort((a, b) => Number(b.index - a.index))
         setRows(hydrated)
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load bids"

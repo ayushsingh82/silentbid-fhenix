@@ -9,7 +9,7 @@
  * Auth: Authorization: Bearer ${CRON_SECRET}
  *
  * Designed to slot in behind cron-job.org without changing the existing
- * scheduler URL path — point cron-job.org at https://<railway>/api/cron/finalize.
+ * scheduler URL path — point cron-job.org at https://<host>/api/cron/finalize.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
@@ -188,7 +188,7 @@ server.listen(PORT, () => {
  * fire (~30s slack). The HTTP /api/cron/finalize endpoint stays as a
  * manual/cron backstop and is idempotent against the poll loop.
  */
-const POLL_INTERVAL_MS = 3_000
+const POLL_INTERVAL_MS = 5_000
 const settled = new Set<string>()  // auction ids confirmed finalized (or no-bids)
 const inFlight = new Set<string>() // auction ids currently being processed
 

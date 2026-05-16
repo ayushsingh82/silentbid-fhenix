@@ -108,9 +108,18 @@ export function AuctionList({ filter }: { filter?: AuctionStatus }) {
   }, [publicClient, fetchAuctions])
 
   const withLiveStatus = auctions.map((a) => ({ ...a, _status: auctionStatus(a) }))
+  // Newest first within each section (descending by auction id). When a
+  // status filter is applied, sort by id desc; otherwise group by status
+  // (active → ended → settled) and sort newest-first inside each group.
   const filtered = filter
-    ? withLiveStatus.filter((a) => a._status === filter)
-    : [...withLiveStatus].sort((a, b) => STATUS_ORDER[a._status] - STATUS_ORDER[b._status])
+    ? withLiveStatus
+        .filter((a) => a._status === filter)
+        .sort((a, b) => (b.id > a.id ? 1 : b.id < a.id ? -1 : 0))
+    : [...withLiveStatus].sort((a, b) => {
+        const s = STATUS_ORDER[a._status] - STATUS_ORDER[b._status]
+        if (s !== 0) return s
+        return b.id > a.id ? 1 : b.id < a.id ? -1 : 0
+      })
 
   if (loading) {
     return (
