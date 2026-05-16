@@ -75,10 +75,10 @@ export async function ensureCofheInit(
     await c.permits.removeActivePermit(chainId, address)
   }
   // Creates + signs (EIP-712) if none active; reuses if still valid.
-  await c.permits.getOrCreateSelfPermit(
-    publicClient as never,
-    walletClient as never,
-  )
+  // No args — the client wrapper reads publicClient/walletClient/chainId
+  // from its internal connect store. Passing positional args here would be
+  // interpreted as (chainId?, account?, options?) and corrupt the issuer.
+  await c.permits.getOrCreateSelfPermit()
 }
 
 /** Encrypt values client-side. Returns encrypted input structs for contract calls. */
