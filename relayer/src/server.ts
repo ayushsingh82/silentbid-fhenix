@@ -188,7 +188,7 @@ server.listen(PORT, () => {
  * fire (~30s slack). The HTTP /api/cron/finalize endpoint stays as a
  * manual/cron backstop and is idempotent against the poll loop.
  */
-const POLL_INTERVAL_MS = 5_000
+const POLL_INTERVAL_MS = 3_000
 const settled = new Set<string>()  // auction ids confirmed finalized (or no-bids)
 const inFlight = new Set<string>() // auction ids currently being processed
 

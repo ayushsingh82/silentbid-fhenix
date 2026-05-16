@@ -46,11 +46,10 @@ export type ActionResult = {
 }
 
 // CoFHE threshold network indexing lag after FHE.allowPublic. The SDK
-// retries decryptForTx internally until this budget elapses. Short value
-// is fine because the background poll loop in server.ts retries every 5s,
-// so if the oracle isn't ready yet we just try again on the next tick
-// rather than holding a single request open.
-const COFHE_ORACLE_WAIT_MS = 30_000
+// retries decryptForTx internally (every ~2-3s) until this budget elapses.
+// 90s covers ~p99 of observed indexing windows in one call — avoids the
+// 5s/cycle gap the poll loop would otherwise add by retrying.
+const COFHE_ORACLE_WAIT_MS = 90_000
 
 export type KeeperConfig = {
   privateKey: `0x${string}`
@@ -217,9 +216,16 @@ export async function processAuction(
         account: ctx.account,
         chain: baseSepolia,
       })
-      await ctx.publicClient.waitForTransactionReceipt({ hash })
       out.push({ auctionId: id.toString(), action: "endAuction", tx: hash })
+      // Don't `waitForTransactionReceipt` here — the CoFHE threshold
+      // network watches chain events directly, so it sees `allowPublic` as
+      // soon as endAuction mines (regardless of whether we waited). Going
+      // straight into the decrypt call lets the SDK's internal polling
+      // overlap with the tx confirmation.
       // Re-read so the finalize step sees the post-endAuction handles.
+      // Small chance the read races the mine; if it does, the handles will
+      // be zeros and decryptForTx 404s — the 90s budget covers the few
+      // seconds until the new block lands.
       a = await readAuction(id, ctx)
     } catch (e) {
       out.push({
