@@ -33,7 +33,9 @@ export type ActionResult = {
   auctionId: string
   action:
     | "endAuction"
+    | "endAuction-error"
     | "finalizeAuction"
+    | "finalize-error"
     | "skip-live"
     | "skip-finalized"
     | "skip-pending-oracle"
@@ -176,7 +178,7 @@ async function doFinalize(
       action:
         msg.includes("404") || msg.toLowerCase().includes("not found")
           ? "skip-pending-oracle"
-          : "finalizeAuction",
+          : "finalize-error",
       error: msg,
     }
   }
@@ -222,7 +224,7 @@ export async function processAuction(
     } catch (e) {
       out.push({
         auctionId: id.toString(),
-        action: "endAuction",
+        action: "endAuction-error",
         error: (e as Error).message.slice(0, 240),
       })
       return out

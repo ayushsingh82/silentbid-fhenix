@@ -245,9 +245,20 @@ async function pollTick(): Promise<void> {
     processAuction(id, ctx, chainNow)
       .then((results) => {
         console.log(`[poll] #${key}:`, results.map((r) => r.action).join(", "))
-        if (results.some((r) => r.action === "finalizeAuction" || r.action === "skip-finalized")) {
-          settled.add(key)
+        for (const r of results) {
+          if (r.error) console.error(`[poll] #${key} ${r.action} error:`, r.error)
         }
+        // Only mark settled on actual success — errors mean we should retry
+        // on the next tick. finalizeAuction requires a tx hash to count;
+        // skip-finalized means it was already settled; skip-no-bids is a
+        // terminal zombie state.
+        const success = results.some(
+          (r) =>
+            (r.action === "finalizeAuction" && r.tx) ||
+            r.action === "skip-finalized" ||
+            r.action === "skip-no-bids",
+        )
+        if (success) settled.add(key)
       })
       .catch((e) => {
         console.error(`[poll] processAuction(${key}) threw:`, (e as Error).message.slice(0, 200))
