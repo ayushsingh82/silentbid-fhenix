@@ -36,11 +36,8 @@ function requireEnv(name: string): string {
 
 const KEEPER_PRIVATE_KEY = requireEnv("KEEPER_PRIVATE_KEY") as `0x${string}`
 const CRON_SECRET = requireEnv("CRON_SECRET")
-const AUCTION_ADDRESS = requireEnv("AUCTION_ADDRESS") as Address
-const RPC_URL =
-  process.env.RPC_URL ||
-  process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL ||
-  "https://base-sepolia-rpc.publicnode.com"
+const AUCTION_ADDRESS = "0x2e396E1f8Bba845a6dAF481099452B360b8b26DE" as Address
+const RPC_URL = "https://sepolia.base.org"
 
 if (!KEEPER_PRIVATE_KEY.startsWith("0x")) {
   console.error("[fatal] KEEPER_PRIVATE_KEY must start with 0x")

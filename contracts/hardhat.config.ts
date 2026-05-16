@@ -32,7 +32,7 @@ const config: HardhatUserConfig = {
     enabled: true,
   },
   etherscan: {
-    apiKey: 'S1NCJYJ8FER5R28GZUD8NVXFIX549H7RSC',
+    apiKey: '3MSGHNT5FBQR596KG667W6PCXJHQVX4YYS',
   },
 }
 
