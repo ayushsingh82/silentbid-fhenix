@@ -21,10 +21,12 @@ import { baseSepolia } from "viem/chains"
 import { AUCTION_ABI, type AuctionData } from "./abi.js"
 
 type DecryptForTxResult = { decryptedValue: bigint; signature: `0x${string}` }
+type DecryptBuilder = {
+  set404RetryTimeout: (ms: number) => DecryptBuilder
+  withoutPermit: () => { execute: () => Promise<DecryptForTxResult> }
+}
 type CofheNodeClient = {
-  decryptForTx: (handle: `0x${string}`) => {
-    withoutPermit: () => { execute: () => Promise<DecryptForTxResult> }
-  }
+  decryptForTx: (handle: `0x${string}`) => DecryptBuilder
 }
 
 export type ActionResult = {
@@ -35,10 +37,15 @@ export type ActionResult = {
     | "skip-live"
     | "skip-finalized"
     | "skip-pending-oracle"
+    | "skip-no-bids"
     | "noop"
   tx?: `0x${string}`
   error?: string
 }
+
+// CoFHE threshold network indexing lag after FHE.allowPublic — bump if
+// flaky. The SDK retries decryptForTx internally until this budget elapses.
+const COFHE_ORACLE_WAIT_MS = 120_000
 
 export type KeeperConfig = {
   privateKey: `0x${string}`
@@ -110,19 +117,79 @@ export async function readNextAuctionId(ctx: KeeperContext): Promise<bigint> {
   })) as bigint
 }
 
+async function readAuction(id: bigint, ctx: KeeperContext): Promise<AuctionData> {
+  return (await ctx.publicClient.readContract({
+    address: ctx.auctionAddress,
+    abi: AUCTION_ABI,
+    functionName: "getAuction",
+    args: [id],
+  })) as AuctionData
+}
+
+async function doFinalize(
+  id: bigint,
+  a: AuctionData,
+  ctx: KeeperContext,
+): Promise<ActionResult> {
+  if (a.numBids === 0n) {
+    return { auctionId: id.toString(), action: "skip-no-bids" }
+  }
+  try {
+    const client = await ctx.getCofhe()
+    // set404RetryTimeout makes the SDK wait up to COFHE_ORACLE_WAIT_MS for
+    // the threshold network to index the FHE.allowPublic event mined inside
+    // endAuction. Lets us chain endAuction → finalize in a single call.
+    const bidderResult = await client
+      .decryptForTx(a.highestBidderHandle)
+      .set404RetryTimeout(COFHE_ORACLE_WAIT_MS)
+      .withoutPermit()
+      .execute()
+    const amountResult = await client
+      .decryptForTx(a.highestBidHandle)
+      .set404RetryTimeout(COFHE_ORACLE_WAIT_MS)
+      .withoutPermit()
+      .execute()
+
+    const winnerRaw = bidderResult.decryptedValue
+    const amountRaw = amountResult.decryptedValue
+    const winner = (`0x${winnerRaw.toString(16).padStart(40, "0")}`) as Address
+
+    const hash = await ctx.walletClient.writeContract({
+      address: ctx.auctionAddress,
+      abi: AUCTION_ABI,
+      functionName: "finalizeAuction",
+      args: [id, winner, amountRaw, bidderResult.signature, amountResult.signature],
+      account: ctx.account,
+      chain: baseSepolia,
+    })
+    await ctx.publicClient.waitForTransactionReceipt({ hash })
+    return { auctionId: id.toString(), action: "finalizeAuction", tx: hash }
+  } catch (e) {
+    const msg = (e as Error).message.slice(0, 300)
+    return {
+      auctionId: id.toString(),
+      action:
+        msg.includes("404") || msg.toLowerCase().includes("not found")
+          ? "skip-pending-oracle"
+          : "finalizeAuction",
+      error: msg,
+    }
+  }
+}
+
+/**
+ * Drive an auction as far as it can go in a single call. Chains both
+ * transitions (live→ended via endAuction, ended→finalized via finalize)
+ * inside one HTTP invocation — cron-job.org only needs to fire once per
+ * auction, at endTime + small slack.
+ */
 export async function processAuction(
   id: bigint,
   ctx: KeeperContext,
   chainNow: bigint,
 ): Promise<ActionResult[]> {
   const out: ActionResult[] = []
-
-  const a = (await ctx.publicClient.readContract({
-    address: ctx.auctionAddress,
-    abi: AUCTION_ABI,
-    functionName: "getAuction",
-    args: [id],
-  })) as AuctionData
+  let a = await readAuction(id, ctx)
 
   if (a.finalized) {
     out.push({ auctionId: id.toString(), action: "skip-finalized" })
@@ -145,54 +212,19 @@ export async function processAuction(
       })
       await ctx.publicClient.waitForTransactionReceipt({ hash })
       out.push({ auctionId: id.toString(), action: "endAuction", tx: hash })
+      // Re-read so the finalize step sees the post-endAuction handles.
+      a = await readAuction(id, ctx)
     } catch (e) {
       out.push({
         auctionId: id.toString(),
         action: "endAuction",
         error: (e as Error).message.slice(0, 240),
       })
+      return out
     }
-    return out
   }
 
-  try {
-    const client = await ctx.getCofhe()
-    const bidderHandle = a.highestBidderHandle
-    const amountHandle = a.highestBidHandle
-
-    const bidderResult = await client
-      .decryptForTx(bidderHandle)
-      .withoutPermit()
-      .execute()
-    const amountResult = await client
-      .decryptForTx(amountHandle)
-      .withoutPermit()
-      .execute()
-
-    const winnerRaw = bidderResult.decryptedValue
-    const amountRaw = amountResult.decryptedValue
-    const winner = (`0x${winnerRaw.toString(16).padStart(40, "0")}`) as Address
-
-    const hash = await ctx.walletClient.writeContract({
-      address: ctx.auctionAddress,
-      abi: AUCTION_ABI,
-      functionName: "finalizeAuction",
-      args: [id, winner, amountRaw, bidderResult.signature, amountResult.signature],
-      account: ctx.account,
-      chain: baseSepolia,
-    })
-    await ctx.publicClient.waitForTransactionReceipt({ hash })
-    out.push({ auctionId: id.toString(), action: "finalizeAuction", tx: hash })
-  } catch (e) {
-    const msg = (e as Error).message.slice(0, 300)
-    out.push({
-      auctionId: id.toString(),
-      action:
-        msg.includes("404") || msg.toLowerCase().includes("not found")
-          ? "skip-pending-oracle"
-          : "finalizeAuction",
-      error: msg,
-    })
-  }
+  // ended && !finalized — chain immediately into finalize.
+  out.push(await doFinalize(id, a, ctx))
   return out
 }

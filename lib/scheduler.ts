@@ -73,10 +73,8 @@ function fireDateToSchedule(fire: Date): CronJobSchedule {
 }
 
 export type ScheduleResult = {
-  endJobId: number
-  finalizeJobId: number
-  endFireAt: string
-  finalizeFireAt: string
+  jobId: number
+  fireAt: string
   url: string
 }
 
@@ -131,30 +129,19 @@ export async function scheduleAuctionFinalize(opts: {
   const baseClean = baseUrl.replace(/\/$/, "")
   const url = `${baseClean}/api/cron/finalize?auctionId=${auctionId}`
 
-  const endFireAt = new Date((Number(endTimeUnix) + 30) * 1000)
-  const finalizeFireAt = new Date((Number(endTimeUnix) + 90) * 1000)
+  // Single fire at endTime+30s — the relayer now chains endAuction →
+  // (CoFHE oracle wait) → finalizeAuction inside one HTTP call. The 30s
+  // slack is to clear any block.timestamp drift so `require(block.timestamp
+  // >= endTime)` in endAuction passes on the first try.
+  const fireAt = new Date((Number(endTimeUnix) + 30) * 1000)
 
-  // Sequential, not parallel — cron-job.org's API rate-limits bursts.
-  const endJobId = await createOneShot({
+  const jobId = await createOneShot({
     url,
-    title: `silentbid-fhenix-end-${auctionId}`,
-    fireAt: endFireAt,
-    cronSecret,
-    apiKey,
-  })
-  const finalizeJobId = await createOneShot({
-    url,
-    title: `silentbid-fhenix-finalize-${auctionId}`,
-    fireAt: finalizeFireAt,
+    title: `silentbid-fhenix-${auctionId}`,
+    fireAt,
     cronSecret,
     apiKey,
   })
 
-  return {
-    endJobId,
-    finalizeJobId,
-    endFireAt: endFireAt.toISOString(),
-    finalizeFireAt: finalizeFireAt.toISOString(),
-    url,
-  }
+  return { jobId, fireAt: fireAt.toISOString(), url }
 }
