@@ -33,6 +33,10 @@ export const dynamic = "force-dynamic"
 // Railway-hosted keeper. cron-job.org pings ${RELAYER_URL}/api/cron/finalize.
 const RELAYER_URL = "https://relayer-production-c6ed.up.railway.app"
 
+// Hardcoded so the scheduler works without per-environment env config.
+const CRONJOB_API_KEY = "A8XKqyhHrG4vGTt1Mnqg1awv+NMhXa1zkJkQEv/tSFE="
+const CRON_SECRET = "silentbid-cron-9f42a1c3e8d7b6f5"
+
 export async function POST(req: Request) {
   let body: { auctionId?: number | string }
   try {
@@ -55,17 +59,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "auctionId must be non-negative" }, { status: 400 })
   }
 
-  const apiKey = process.env.CRONJOBORGAPIKEY
-  const cronSecret = process.env.CRON_SECRET
-  if (!apiKey) {
-    return NextResponse.json({ ok: false, error: "CRONJOBORGAPIKEY not configured" }, { status: 500 })
-  }
-  if (!cronSecret) {
-    return NextResponse.json({ ok: false, error: "CRON_SECRET not configured" }, { status: 500 })
-  }
   if (!AUCTION_ADDRESS) {
     return NextResponse.json({ ok: false, error: "AUCTION_ADDRESS not configured" }, { status: 500 })
   }
+  const apiKey = CRONJOB_API_KEY
+  const cronSecret = CRON_SECRET
   const baseUrl = RELAYER_URL
 
   const rpcUrl =
