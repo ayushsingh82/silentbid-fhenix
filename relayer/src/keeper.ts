@@ -45,7 +45,12 @@ export type ActionResult = {
 
 // CoFHE threshold network indexing lag after FHE.allowPublic — bump if
 // flaky. The SDK retries decryptForTx internally until this budget elapses.
-const COFHE_ORACLE_WAIT_MS = 120_000
+// 120s was too tight: a cron-fired call hit endAuction successfully but
+// timed out the decrypt wait before the oracle indexed. 240s covers the
+// observed p99 indexing window on Base Sepolia. cron-job.org's own HTTP
+// timeout (~30s) doesn't matter here — the relayer keeps running after the
+// client disconnects, and the chain finalize lands whenever it lands.
+const COFHE_ORACLE_WAIT_MS = 240_000
 
 export type KeeperConfig = {
   privateKey: `0x${string}`
