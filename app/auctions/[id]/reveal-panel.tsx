@@ -161,9 +161,7 @@ export function RevealPanel({
           <p className="mt-2">Auction has been settled automatically.</p>
         </div>
       ) : (needsEnd || needsFinalize) ? (
-        <div className="mt-6 border border-border/40 bg-muted/5 p-4 font-mono text-xs text-muted-foreground">
-          <p className="uppercase tracking-widest">Settling…</p>
-        </div>
+        <SettlementProgress auction={auction} />
       ) : null}
 
       {auction.finalized && (
@@ -268,6 +266,131 @@ export function RevealPanel({
           </ul>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Reads the auction's chain state and renders a 3-step progress card.
+ * Each step shows ✓ (done), ⟳ (in flight), or ○ (pending). The phase is
+ * derived from `auction.ended` + `auction.finalized` + `auction.numBids`.
+ *
+ *   live  → endAuction in flight   → CoFHE decrypting   → finalize
+ *           (relayer poll loop will             (~30-60s, MPC on
+ *            fire at chainNow >= endTime)        threshold network)
+ */
+function SettlementProgress({ auction }: { auction: AuctionData }) {
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  useEffect(() => {
+    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  const elapsedSinceEnd = Math.max(0, now - Number(auction.endTime))
+  const noBids = auction.ended && auction.numBids === 0n
+
+  // Phase derivation
+  const step1Done = auction.ended
+  const step2Done = auction.finalized || noBids
+  const step3Done = auction.finalized
+
+  // Rough remaining estimate for the active step
+  // step 1 (endAuction): poll loop fires within ~5s of endTime + ~5s tx confirm
+  // step 2 (oracle decrypt): ~30-45s of MPC + sig from CoFHE threshold network
+  // step 3 (finalize tx): ~5s
+  let estRemaining: number | null = null
+  if (!step1Done) {
+    estRemaining = Math.max(0, 10 - elapsedSinceEnd)
+  } else if (!step2Done) {
+    // CoFHE timer starts at endAuction time, which we approximate as endTime + ~10s
+    estRemaining = Math.max(0, 50 - elapsedSinceEnd)
+  } else if (!step3Done) {
+    estRemaining = 5
+  }
+
+  const Step = ({ n, label, done, active, sublabel }: {
+    n: number
+    label: string
+    done: boolean
+    active: boolean
+    sublabel?: string
+  }) => (
+    <li className="flex items-start gap-3">
+      <span className={cn(
+        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold",
+        done ? "border-accent bg-accent text-accent-foreground" :
+        active ? "border-accent text-accent animate-pulse" :
+        "border-border/50 text-muted-foreground/50",
+      )}>
+        {done ? "✓" : active ? "⟳" : n}
+      </span>
+      <div className="min-w-0">
+        <p className={cn(
+          "uppercase tracking-widest",
+          done ? "text-accent" : active ? "text-foreground" : "text-muted-foreground/60",
+        )}>{label}</p>
+        {sublabel && (
+          <p className="mt-0.5 text-[10px] normal-case tracking-normal text-muted-foreground/70">{sublabel}</p>
+        )}
+      </div>
+    </li>
+  )
+
+  if (noBids) {
+    return (
+      <div className="mt-6 border border-muted-foreground/30 bg-muted/5 p-4 font-mono text-xs">
+        <p className="uppercase tracking-widest text-muted-foreground">No bids — auction void</p>
+        <p className="mt-2 text-muted-foreground/70">
+          Nothing to finalize. Seller's gas deposit is locked on chain.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-6 border border-accent/30 bg-accent/5 p-4 font-mono text-xs">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <p className="uppercase tracking-widest text-accent">Automatic settlement in progress</p>
+        <p className="text-[10px] text-muted-foreground/70 tabular-nums">
+          {elapsedSinceEnd}s elapsed{estRemaining !== null && estRemaining > 0 ? ` · ~${estRemaining}s left` : ""}
+        </p>
+      </div>
+      <ul className="mt-4 space-y-3">
+        <Step
+          n={1}
+          label="End auction"
+          done={step1Done}
+          active={!step1Done}
+          sublabel={!step1Done ? "Railway keeper detected expiry, submitting endAuction tx…" : undefined}
+        />
+        <Step
+          n={2}
+          label="CoFHE oracle decrypting winner"
+          done={step2Done}
+          active={step1Done && !step2Done}
+          sublabel={
+            step1Done && !step2Done
+              ? "Threshold network running MPC + signing plaintext (~30-45s)"
+              : undefined
+          }
+        />
+        <Step
+          n={3}
+          label="Publish winner + settle bids"
+          done={step3Done}
+          active={step2Done && !step3Done}
+          sublabel={
+            step2Done && !step3Done
+              ? "Submitting finalizeAuction(winner, amount, sigs)…"
+              : undefined
+          }
+        />
+      </ul>
+      <p className="mt-4 pt-3 border-t border-border/30 text-[10px] text-muted-foreground/60">
+        Keeper EOA: <span className="text-muted-foreground">0xf43F…4Cf7</span>
+        {" · "}
+        Polls chain every 5s — no wallet signature required.
+      </p>
     </div>
   )
 }
