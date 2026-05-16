@@ -21,6 +21,7 @@ import {
   type ActionResult,
   type KeeperContext,
 } from "./keeper.js"
+import { AUCTION_ABI, type AuctionData } from "./abi.js"
 import type { Address } from "viem"
 
 const PORT = Number(process.env.PORT) || 3000
@@ -175,3 +176,87 @@ server.listen(PORT, () => {
     `[relayer] listening on :${PORT} keeper=${ctx.account.address} auction=${AUCTION_ADDRESS}`,
   )
 })
+
+/**
+ * Background chain-poll loop. Every POLL_INTERVAL_MS we:
+ *   1. read nextAuctionId
+ *   2. for each id not yet finalized, read its state
+ *   3. if chainNow >= endTime && !finalized, fire processAuction
+ *
+ * This removes the cron-job.org slack — auctions are picked up within
+ * POLL_INTERVAL_MS of their endTime instead of waiting for cron-job.org to
+ * fire (~30s slack). The HTTP /api/cron/finalize endpoint stays as a
+ * manual/cron backstop and is idempotent against the poll loop.
+ */
+const POLL_INTERVAL_MS = 5_000
+const settled = new Set<string>()  // auction ids confirmed finalized (or no-bids)
+const inFlight = new Set<string>() // auction ids currently being processed
+
+async function pollTick(): Promise<void> {
+  let chainNow: bigint
+  let nextId: bigint
+  try {
+    const [now, next] = await Promise.all([
+      ctx.publicClient.getBlock({ blockTag: "latest" }).then((b) => b.timestamp),
+      ctx.publicClient.readContract({
+        address: ctx.auctionAddress,
+        abi: AUCTION_ABI,
+        functionName: "nextAuctionId",
+      }) as Promise<bigint>,
+    ])
+    chainNow = now
+    nextId = next
+  } catch (e) {
+    console.error("[poll] chain read failed:", (e as Error).message.slice(0, 200))
+    return
+  }
+
+  for (let id = 0n; id < nextId; id++) {
+    const key = id.toString()
+    if (settled.has(key)) continue
+    if (inFlight.has(key)) continue
+
+    let a: AuctionData
+    try {
+      a = (await ctx.publicClient.readContract({
+        address: ctx.auctionAddress,
+        abi: AUCTION_ABI,
+        functionName: "getAuction",
+        args: [id],
+      })) as AuctionData
+    } catch (e) {
+      console.error(`[poll] getAuction(${key}) failed:`, (e as Error).message.slice(0, 160))
+      continue
+    }
+
+    if (a.finalized) {
+      settled.add(key)
+      continue
+    }
+    if (a.ended && a.numBids === 0n) {
+      // No-bid auction stuck post-endAuction — nothing to decrypt. Don't
+      // re-process every tick.
+      settled.add(key)
+      continue
+    }
+    if (chainNow < a.endTime) continue
+
+    inFlight.add(key)
+    processAuction(id, ctx, chainNow)
+      .then((results) => {
+        console.log(`[poll] #${key}:`, results.map((r) => r.action).join(", "))
+        if (results.some((r) => r.action === "finalizeAuction" || r.action === "skip-finalized")) {
+          settled.add(key)
+        }
+      })
+      .catch((e) => {
+        console.error(`[poll] processAuction(${key}) threw:`, (e as Error).message.slice(0, 200))
+      })
+      .finally(() => inFlight.delete(key))
+  }
+}
+
+setInterval(() => {
+  void pollTick()
+}, POLL_INTERVAL_MS)
+console.log(`[relayer] chain poll loop active every ${POLL_INTERVAL_MS}ms`)

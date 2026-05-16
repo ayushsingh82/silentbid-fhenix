@@ -43,14 +43,12 @@ export type ActionResult = {
   error?: string
 }
 
-// CoFHE threshold network indexing lag after FHE.allowPublic — bump if
-// flaky. The SDK retries decryptForTx internally until this budget elapses.
-// 120s was too tight: a cron-fired call hit endAuction successfully but
-// timed out the decrypt wait before the oracle indexed. 240s covers the
-// observed p99 indexing window on Base Sepolia. cron-job.org's own HTTP
-// timeout (~30s) doesn't matter here — the relayer keeps running after the
-// client disconnects, and the chain finalize lands whenever it lands.
-const COFHE_ORACLE_WAIT_MS = 240_000
+// CoFHE threshold network indexing lag after FHE.allowPublic. The SDK
+// retries decryptForTx internally until this budget elapses. Short value
+// is fine because the background poll loop in server.ts retries every 5s,
+// so if the oracle isn't ready yet we just try again on the next tick
+// rather than holding a single request open.
+const COFHE_ORACLE_WAIT_MS = 30_000
 
 export type KeeperConfig = {
   privateKey: `0x${string}`
@@ -141,19 +139,21 @@ async function doFinalize(
   }
   try {
     const client = await ctx.getCofhe()
-    // set404RetryTimeout makes the SDK wait up to COFHE_ORACLE_WAIT_MS for
-    // the threshold network to index the FHE.allowPublic event mined inside
-    // endAuction. Lets us chain endAuction → finalize in a single call.
-    const bidderResult = await client
-      .decryptForTx(a.highestBidderHandle)
-      .set404RetryTimeout(COFHE_ORACLE_WAIT_MS)
-      .withoutPermit()
-      .execute()
-    const amountResult = await client
-      .decryptForTx(a.highestBidHandle)
-      .set404RetryTimeout(COFHE_ORACLE_WAIT_MS)
-      .withoutPermit()
-      .execute()
+    // Both handles got their `allowPublic` flag set in the same endAuction
+    // tx, so the threshold network indexes them together. Run the two
+    // decrypts in parallel — saves whichever-is-slower's worth of wall time.
+    const [bidderResult, amountResult] = await Promise.all([
+      client
+        .decryptForTx(a.highestBidderHandle)
+        .set404RetryTimeout(COFHE_ORACLE_WAIT_MS)
+        .withoutPermit()
+        .execute(),
+      client
+        .decryptForTx(a.highestBidHandle)
+        .set404RetryTimeout(COFHE_ORACLE_WAIT_MS)
+        .withoutPermit()
+        .execute(),
+    ])
 
     const winnerRaw = bidderResult.decryptedValue
     const amountRaw = amountResult.decryptedValue
