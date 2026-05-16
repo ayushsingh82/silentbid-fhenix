@@ -30,22 +30,8 @@ import { scheduleAuctionFinalize } from "@/lib/scheduler"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-// Resolve the public URL where cron-job.org should ping. Order of preference:
-//   1. KEEPER_URL (explicit, e.g. https://silentbid-fhenix.vercel.app)
-//   2. VERCEL_PROJECT_PRODUCTION_URL (Vercel auto-injects)
-//   3. host header (works for previews and local dev)
-function resolveBaseUrl(req: Request): string | null {
-  const explicit = process.env.KEEPER_URL
-  if (explicit) return explicit
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL
-  if (vercel) return `https://${vercel}`
-  const host = req.headers.get("host")
-  if (host) {
-    const proto = host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https"
-    return `${proto}://${host}`
-  }
-  return null
-}
+// Railway-hosted keeper. cron-job.org pings ${RELAYER_URL}/api/cron/finalize.
+const RELAYER_URL = "https://relayer-production-c6ed.up.railway.app"
 
 export async function POST(req: Request) {
   let body: { auctionId?: number | string }
@@ -80,10 +66,7 @@ export async function POST(req: Request) {
   if (!AUCTION_ADDRESS) {
     return NextResponse.json({ ok: false, error: "AUCTION_ADDRESS not configured" }, { status: 500 })
   }
-  const baseUrl = resolveBaseUrl(req)
-  if (!baseUrl) {
-    return NextResponse.json({ ok: false, error: "could not resolve base url" }, { status: 500 })
-  }
+  const baseUrl = RELAYER_URL
 
   const rpcUrl =
     process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || "https://base-sepolia-rpc.publicnode.com"
