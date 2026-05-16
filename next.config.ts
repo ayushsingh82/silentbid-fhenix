@@ -3,6 +3,11 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Empty turbopack config to silence the webpack-only warning in Next 16
   turbopack: {},
+  // Externalize @cofhe/sdk + node-tfhe for server bundles so the .wasm files
+  // get loaded by Node's require() from node_modules instead of webpack
+  // trying to inline them (it copies the JS chunk but not the sibling
+  // tfhe_bg.wasm, breaking the cron route's decryptForTx call).
+  serverExternalPackages: ["@cofhe/sdk", "node-tfhe", "tfhe"],
   async headers() {
     return [
       {

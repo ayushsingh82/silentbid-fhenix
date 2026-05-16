@@ -92,6 +92,23 @@ export function CreateAuctionForm() {
         })
         .find((d) => d?.eventName === "AuctionCreated")
       const newId = (evt?.args as { auctionId?: bigint } | undefined)?.auctionId
+
+      // Best-effort: register a cron-job.org one-shot pair so the keeper
+      // fires precisely when this auction expires. The endpoint re-reads the
+      // auction from chain, so a malicious or stale client can't influence
+      // what gets scheduled. On failure (network blip, cron-job.org down,
+      // env not configured) the in-page automation hook still picks it up.
+      if (newId !== undefined) {
+        fetch("/api/scheduler", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auctionId: newId.toString() }),
+        }).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn("auto-schedule failed (in-page automation will catch up):", err)
+        })
+      }
+
       router.push(newId !== undefined ? `/auctions/${newId.toString()}` : "/auctions")
     } catch (err) {
       setError(err instanceof Error ? err.message.slice(0, 200) : "Create failed")

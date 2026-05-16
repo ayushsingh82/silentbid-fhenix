@@ -1,8 +1,16 @@
 # Wave 4: Full Chainlink Automation Integration
 
-> **Current state:** Frontend automation hook (`useAuctionAutomation`) works end-to-end but requires page to stay open. Keeper contract deployed but not yet wired to Chainlink.
+> **Current state:** Backend settlement service (Option A below) is now implemented as a port of the ZAMA approach: cron-job.org one-shots ping `/api/cron/finalize?auctionId=N`, which drives the chain state machine (`endAuction` → CoFHE `decryptForTx` → `finalizeAuction`) without requiring the browser tab to stay open. Frontend automation hook (`useAuctionAutomation`) is retained as a manual/fallback override.
 >
-> **Wave 4 goal:** Remove frontend automation dependency. Deploy fully managed on-chain settlement via Chainlink Automation.
+> **What ships today (no Chainlink required):**
+> - `lib/scheduler.ts` — cron-job.org REST client, registers one-shots at endTime+30s and endTime+90s.
+> - `app/api/scheduler/route.ts` — POST endpoint called by the create-auction form; re-reads chain state, never trusts client-supplied timing.
+> - `app/api/cron/finalize/route.ts` — GET endpoint that runs one transition per call using `@cofhe/sdk/node` for `decryptForTx` + signed plaintext.
+> - Required env: `CRONJOBORGAPIKEY`, `CRON_SECRET`, `KEEPER_PRIVATE_KEY`, `KEEPER_URL` (or auto-resolved on Vercel), `NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL` (optional).
+>
+> **Still optional (Wave 4 stretch):** Wrap `SilentBidAutomationKeeper` with `AutomationCompatibleInterface` and register on Chainlink Automation. The cron approach above is the ZAMA-equivalent MVP and removes the "page must stay open" limitation that motivated this wave.
+>
+> **Wave 4 stretch goal:** Replace the cron-job.org backend with fully managed on-chain settlement via Chainlink Automation.
 
 ---
 
