@@ -39,10 +39,6 @@ relayer/
     server.ts          # HTTP routes + background poll loop
 ```
 
-The keeper EOA (`0xf43F4FC18BaCEFE1C96e4FA6bdc8585FBAEd4Cf7`), auction
-address (`0x2e396E1f8Bba845a6dAF481099452B360b8b26DE`), and RPC URL are
-hardcoded in `relayer/src/server.ts` — there is no per-environment
-config drift.
 
 ### 2. State machine (`relayer/src/keeper.ts`)
 
@@ -86,42 +82,6 @@ Verified on BaseScan + Sourcify with the source committed in
 `contracts/contracts/SilentBidAuction.sol`, so the BaseScan "Contract"
 tab now shows the full ABI and source.
 
-A one-shot helper script (`contracts/scripts/redeploy-auction.ts`) does
-the deploy + Treasury authorisation in one step; `e2e-no-batteries.ts`
-runs a full create → bid → auto-settle → assert-winner end-to-end check
-against the live deployment without depending on the hardhat-cofhe
-plugin's mock infrastructure.
-
-### 4. Frontend changes
-
-- **`lib/use-auction-automation.ts` deleted.** All in-browser
-  endAuction / decrypt / finalize logic is gone. Bidders place bids
-  and never see a settlement signature prompt.
-- **`app/auctions/[id]/page.tsx`** no longer renders the
-  `⚙️ Auto-Settling` banner or passes `automationStatus` to the reveal
-  panel.
-- **`app/auctions/[id]/reveal-panel.tsx`** drops the manual "End
-  auction" / "Finalize" buttons and the gas-pool hint. The settlement
-  region now renders a `<SettlementProgress>` card that mirrors the
-  keeper's actual phases:
-
-  ```
-  AUTOMATIC SETTLEMENT IN PROGRESS         45s elapsed · ~15s left
-
-  ✓  End auction
-  ⟳  CoFHE oracle decrypting winner
-     Threshold network running MPC + signing plaintext (~30-45s)
-  ○  Publish winner + settle bids
-
-  Keeper EOA: 0xf43F…4Cf7 · no wallet signature required.
-  ```
-
-  Step states are derived from `auction.ended`, `auction.finalized`,
-  and `auction.numBids` and refresh once per second. No-bid auctions
-  render a distinct "auction void" terminal card instead of being
-  stuck in "settling" forever. The active step animates so the wait
-  visually reads as work-in-progress rather than a hang.
-
 ### 5. CoFHE permit auto-refresh (`lib/cofhe.ts`)
 
 The CoFHE SDK's `getOrCreateSelfPermit()` replays a cached self-permit
@@ -138,13 +98,6 @@ rejects it. Two changes fix this transparently:
   `walletClient`, and retries the decrypt once. So clicking **Unseal**
   on a stale permit pops a signature prompt, the user signs, and the
   unseal completes — no second click required.
-
-### 6. Scheduler hardcoded for zero-config deploy
-
-`app/api/scheduler/route.ts` no longer reads `CRONJOBORGAPIKEY`,
-`CRON_SECRET`, or `RELAYER_URL` from `process.env`. All three are
-constants in the route source, so the production deploy works without
-per-environment configuration.
 
 ---
 
